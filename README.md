@@ -58,7 +58,11 @@ I know about these issues.
 Every now and then you may receive a page fault when existing the app. I have a feeling this is due to
 how I'm trying to interrupt the running threads.
 
+The shadowing does not currently do a check for ray-length bounds so you can get shadows on surfaces where they don't belong.
 
+Another problem with the shadowing is the main light above the spinning cube does not cast a shadow?
+
+The x64 executable download is being flagged by Chrome as having a virus??? It's not but you have been warned.
 
 
 # What's next? #
@@ -71,6 +75,8 @@ Probably nothing! aside from a little tinkering.
 Follow the link to download the working demo, includes X64 binary's and required
 assets. Just extract files to a folder and run the executable.
 [x64 downloaded here](https://204am.com/downloads/zray_2025.zip) md5:c09f54a421db24d15bb95afa2cf98cda
+NOTE: The x64 executable download is being flagged by Chrome as being a virus??? It's not but you have been warned.
+
 
 [textures only](https://204am.com/downloads/zray_textures.zip) md5:96b55dae3665763abd403103b252607b
 

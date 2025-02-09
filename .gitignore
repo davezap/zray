@@ -1,0 +1,17 @@
+Thumbs.db
+$PBOPREFIX$.txt
+$PREFIX$
+$REVISION$
+bin/
+.vs/
+x64/
+Ray_2025/
+.env
+zspace/
+textures/
+SDL3.dll
+SDL3.lib
+thumb.png
+*.mp4
+*.user
+release/

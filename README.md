@@ -53,9 +53,10 @@ Whole bunch of refactoring, comments.
 
 # Issues #
 
+
 I know about these issues.
 
-Every now and then you may receive a page fault when existing the app. I have a feeling this is due to
+Every now and then you may receive a page fault when exiting the app. I have a feeling this is due to
 how I'm trying to interrupt the running threads.
 
 The shadowing does not currently do a check for ray-length bounds so you can get shadows on surfaces where they don't belong.

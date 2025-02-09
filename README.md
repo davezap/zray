@@ -41,9 +41,9 @@ SDL is providing us a screen buffer to draw pixels into, and keyboard interactio
 Added multithreading support. The rendering is now divided between threads. The number of threads
 is selectable by the user at run time using the n & m keys.
 
-Added spheres that we previously not implemented.
+Added spheres that were previously not implemented.
 
-Fixed cross-product implementation that saw the x and z access reversed. Normal orientation is now... normal.
+Fixed cross-product implementation that saw the x and z axes reversed. Normal orientation is now... normal.
 
 Creation of vector, colour, camera and other data structures and generally more consistent use
 of data types.

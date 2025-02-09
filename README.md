@@ -4,7 +4,7 @@
 I worked on the first iteration of this ray-tracer in 2002 with the naive idea that
 I could make it run in real time. Well it never ran in real time but it was a fun
 project and was happy with the results. 
-There is no GPU here this is all ray CPU power just like the good old days :)
+There is no GPU here this is all raw CPU power just like the good old days :)
 
 Roll on 2025 and I'm revisiting this and other old projects, getting them running
 again, doing some refactoring, and generally correcting my 22 year old selves coding

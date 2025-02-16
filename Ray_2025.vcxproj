@@ -157,14 +157,15 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="engine_types.h" />
-    <ClInclude Include="zray.h" />
-    <ClInclude Include="math.h" />
-    <ClInclude Include="tracer.h" />
+    <ClInclude Include="z_types.h" />
+    <ClInclude Include="z_helpers.h" />
+    <ClInclude Include="config.h" />
+    <ClInclude Include="z_math.h" />
+    <ClInclude Include="engine.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="zray.cpp" />
-    <ClCompile Include="tracer.cpp" />
+    <ClCompile Include="Main.cpp" />
+    <ClCompile Include="engine.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md" />

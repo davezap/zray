@@ -15,24 +15,27 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="tracer.h">
+    <ClInclude Include="engine.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="zray.h">
+    <ClInclude Include="config.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="math.h">
+    <ClInclude Include="z_math.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="engine_types.h">
+    <ClInclude Include="z_types.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="z_helpers.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="zray.cpp">
+    <ClCompile Include="Main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="tracer.cpp">
+    <ClCompile Include="engine.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -74,7 +74,7 @@ Probably nothing! aside from a little tinkering.
 
 Follow the link to download the working demo, includes X64 binary's and required
 assets. Just extract files to a folder and run the executable.
-[x64 downloaded here](https://204am.com/downloads/zray_2025.zip) md5:c09f54a421db24d15bb95afa2cf98cda
+[x64 downloaded here](https://204am.com/downloads/zray_2025.zip) md5:6f67ec2549c2a57d3d52547a4434dcdc
 NOTE: The x64 executable download is being flagged by Chrome as being a virus??? It's not but you have been warned.
 
 

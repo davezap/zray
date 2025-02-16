@@ -7,8 +7,7 @@ project and was happy with the results.
 There is no GPU here this is all raw CPU power just like the good old days :)
 
 Roll on 2025 and I'm revisiting this and other old projects, getting them running
-again, doing some refactoring, and generally correcting my 22 year old selves coding
-blunders.
+again, doing some refactoring, and generally correcting my 22-year-old self's coding blunders.
 
 Click image to see video.
 [![Watch the video](https://img.youtube.com/vi/65w-QslQVMg/maxresdefault.jpg)](https://youtu.be/65w-QslQVMg)

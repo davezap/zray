@@ -43,12 +43,13 @@ inline bool key_get(SDL_Scancode code)
 
 
 
-inline bool load_texture(cTexture& MyTexture, const wchar_t* szFileName, bool force256)
+inline bool load_texture(cTexture& MyTexture, const wchar_t* szFileName, const wchar_t* szFileNameNormal)
 {
 	char buff[255];
 
 	std::wstring file = ASSETS_PATH;
 	file += szFileName;
+
 	std::wcstombs(buff, file.c_str(), 255);
 	SDL_Surface* bm2 = SDL_LoadBMP(buff);
 
@@ -56,8 +57,9 @@ inline bool load_texture(cTexture& MyTexture, const wchar_t* szFileName, bool fo
 	{
 		SDL_Surface* bm = SDL_ConvertSurface(bm2, SDL_PIXELFORMAT_ABGR32);
 		SDL_DestroySurface(bm2);
-		MyTexture.surface = bm2;
-		MyTexture.pixels = (Colour<BYTE>*)bm->pixels;
+		MyTexture.pixels_colour = (Colour<BYTE>*)bm->pixels;
+		MyTexture.pixels_normal = NULL;
+
 		MyTexture.bmBytesPixel = bm->pitch / bm->w;
 		MyTexture.bmBitsPixel = MyTexture.bmBytesPixel * 8;
 		MyTexture.bmType = bm->format;
@@ -69,8 +71,27 @@ inline bool load_texture(cTexture& MyTexture, const wchar_t* szFileName, bool fo
 
 		MyTexture.hasAlpha = false;
 
+		if (szFileNameNormal) {
+			file = ASSETS_PATH;
+			file += szFileNameNormal;
+			std::wcstombs(buff, file.c_str(), 255);
+			SDL_Surface* bm2 = SDL_LoadBMP(buff);
+			if (bm2)
+			{
+				Colour<BYTE>* pm = (Colour<BYTE>*)bm->pixels;
+				MyTexture.pixels_normal = static_cast<Vec3*>(SDL_malloc(MyTexture.bmWidth * MyTexture.bmHeight * 3 * sizeof(float)));
+				for (z_size_t a = 0; a < MyTexture.bmWidth * MyTexture.bmHeight; a++)
+				{
+					MyTexture.pixels_normal[a] = pm[a].toNormal();
+				}
+				//MyTexture.pixels_normal = ;
+			}
+		}
+
 		return true;
 	}
+
+
 
 	return false;
 }

@@ -13,6 +13,7 @@
 #include "engine.h"
 
 
+#define SCREEN_LEN SCREEN_WIDTH * SCREEN_HEIGHT
 
 // Core rendering variables. //////
 
@@ -34,7 +35,7 @@ thread_local float gtl_matrix[4][4];
 // never write to the same address.
 Colour<BYTE>* g_pixels = NULL;
 
-int g_screen_divisor;	// This is the step the x/y pixel loops, 2 = half screen resolution
+
 int gro_screen_divisor; // ... All other pixels are made the same colour.
 
 
@@ -44,8 +45,10 @@ int gro_screen_divisor; // ... All other pixels are made the same colour.
 #define MAX_THREADS 128			// I mean, how many is too many?
 #ifdef _DEBUG
 BYTE g_threads_requested = 1;	// It's way easyer to debug a single thread.
+int g_screen_divisor = 3;	// This is the step the x/y pixel loops, 2 = half screen resolution
 #else
 BYTE g_threads_requested = 6;	// Standard I used for benchmarking.
+int g_screen_divisor = 1;	// This is the step the x/y pixel loops, 2 = half screen resolution
 #endif
 
 size_t g_threads_allocated = 0;	// Currently allocated threads.
@@ -137,7 +140,6 @@ bool init_world()
 	g_option_antialias = false;
 	g_option_shadows = true;
 	g_option_textures = true;
-	g_screen_divisor = 1;
 	g_option_lighting = true;
 
 	g_light_ambient = { 255, 40,40,40};
@@ -153,7 +155,8 @@ void deinit_world()
 	threads_clear();
 
 	for (z_size_t i = 0; i < g_textures_cnt; i++) {
-		if (g_textures[i].surface) SDL_DestroySurface(g_textures[i].surface);
+		if (g_textures[i].pixels_normal) SDL_free(g_textures[i].pixels_normal);
+		
 	}
 }
 
@@ -170,26 +173,34 @@ void main_loop(Colour<BYTE>* src_pixels)
 
 	z_size_t a = 0;
 
-	box_angle.x += 0.1f;
+	
+	box_angle.z += 0.1f;
 	box_angle.y += 1.0f;
-	if (box_angle.x > 359) box_angle.x = box_angle.x - 360;
-	if (box_angle.y > 359) box_angle.y = box_angle.y - 360;
+	box_angle.roll360();
+	///if (box_angle.x > 359) box_angle.x = box_angle.x - 360;
+	///if (box_angle.y > 359) box_angle.y = box_angle.y - 360;
 	Matrix44 mtrx;
 	mtrx.ident();
 	mtrx.rotate(box_angle);
-
+	//Vec3 p = { -25, -25, -25 };
+	//mtrx.translate(p);
 	a = g_objects_cnt;
 	g_objects_cnt = g_box_idx;
-	g_box_idx; create_box(-25, -25, -25, 50, 50, 50, g_box_texture, 1, 1);
+	create_box(-25, -25, -25, 50, 50, 50, g_box_texture, 1, 1);
 	g_objects_cnt = a;
 	for (a = g_box_idx; a < g_box_idx + 6; a++)
 	{
 		mtrx.transform(g_objects[a].s);
 		mtrx.transform(g_objects[a].dA);
 		mtrx.transform(g_objects[a].dB);
+		mtrx.transform(g_objects[a].dAu);
+		mtrx.transform(g_objects[a].dBu);
+		mtrx.transform(g_objects[a].n);
+		mtrx.transform(g_objects[a].nu);
 		//Ob[a].n = -Ob[a].dA.normal(Ob[a].dB);
 		//CalcNorm(Ob[a]);
 	}
+	
 
 	// Flicker vending machine.
 	// ** It's actually very annoying and looks like a bug.
@@ -344,12 +355,12 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 
 		if (gatm_threads_exit_now.load()) {
 			//if (AltThread) Output(L"exit\n");
-			break;
+			return;
 		}
 
 		//Output(L"[%d] rendering...\n", thread_num);
 
-		float SupSampSize = float(gro_screen_divisor) / 3;
+		float SupSampSize = float(gro_screen_divisor) / 5218.9524;
 		Colour<float> pixel = { 0.0f, 0.0f, 0.0f, 0.0f };		// Temp Color
 
 		// Define out fixed FP in space
@@ -360,32 +371,46 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 		//tsDefRenderStp = 1;
 
 
+		// ok so gtl_camera.screen.s is the center of our view port.
+		// from gtl_camera.screen.s.x
+		// gtl_camera.screen.dA * (Xmax - Xmin)
+		// gtl_camera.screen.dB * (Ymax - Ymin)
+		 
+		//-Xro, -Yro // # top left
+
+
 		for (float Yr = static_cast <float>(Ymin); Yr < Ymax; Yr += gro_screen_divisor)	// tsDefRenderStp
 		{
 
 			for (float Xr = static_cast <float>(Xmin); Xr < Xmax; Xr += gro_screen_divisor)
 			{
 				// This is the point we cast the ray through
-				gtl_camera.screen.s.x = Xr; gtl_camera.screen.s.y = Yr;
-
+				Vec3 pixelPos = (gtl_camera.screen.s - gtl_camera.fp) + (gtl_camera.screen.dA * Xr) + (gtl_camera.screen.dB * Yr);
+				//Vec3 pixelPos = { Xr, Yr, 600 };
+				pixelPos = pixelPos.unitary();
 				// Reset our Point colour..
 				pixel = { 0,0,0,0 };
+				if (Xr == Xmin && Yr == Ymin)
+				{
+					pixel = { 0,0,0,0 };
+				}
 
-				trace(gtl_camera.fp, gtl_camera.screen.s, pixel);
+				trace(gtl_camera.fp, pixelPos, pixel);
 				if (g_option_antialias)
 				{
+
 					// Sample around center point
-					gtl_camera.screen.s.offset({ SupSampSize, SupSampSize, 0 });
-					trace(gtl_camera.fp, gtl_camera.screen.s, pixel);
+					pixelPos.offset({ SupSampSize, SupSampSize, 0 });
+					trace(gtl_camera.fp, pixelPos, pixel);
 
-					gtl_camera.screen.s.offset({ 0, 2 * SupSampSize, 0 });
-					trace(gtl_camera.fp, gtl_camera.screen.s, pixel);
+					pixelPos.offset({ 0, 2 * SupSampSize, 0 });
+					trace(gtl_camera.fp, pixelPos, pixel);
 
-					gtl_camera.screen.s.offset({ -2 * SupSampSize, 0, 0 });
-					trace(gtl_camera.fp, gtl_camera.screen.s, pixel);
+					pixelPos.offset({ -2 * SupSampSize, 0, 0 });
+					trace(gtl_camera.fp, pixelPos, pixel);
 
-					gtl_camera.screen.s.offset({ 0, -2 * SupSampSize, 0 });
-					trace(gtl_camera.fp, gtl_camera.screen.s, pixel);
+					pixelPos.offset({ 0, -2 * SupSampSize, 0 });
+					trace(gtl_camera.fp, pixelPos, pixel);
 					pixel /= 5;
 					//ccR = ccR / 5; ccG = ccG / 5; ccB = ccB / 5;
 				}
@@ -397,6 +422,7 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 
 				//if((Xr + Xro) < SCREEN_WIDTH && (Yr + Yro) < SCREEN_HEIGHT)
 				//{
+				int sd = gro_screen_divisor;
 
 				if (gro_screen_divisor > 1)
 				{
@@ -404,18 +430,16 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 					{
 						for (int y = 0; y < gro_screen_divisor; y++)
 						{
-							Colour<BYTE>* p = &g_pixels[int((y + Yr + Yro) * SCREEN_WIDTH + (x + Xr + Xro))];
+							Colour<BYTE>* p = &g_pixels[int((y + Yr + Yro) * SCREEN_WIDTH  + (x + Xr + Xro)) % (SCREEN_LEN)];
 							p->fromFloatC(pixel);
 						}
 					}
 
 				}
 				else {
-					Colour<BYTE>* p = &g_pixels[int((Yr + Yro) * SCREEN_WIDTH + (Xr + Xro))];
-					p->fromFloatC(pixel);
+					g_pixels[int((Yr + Yro) * SCREEN_WIDTH + (Xr + Xro))].fromFloatC(pixel);
 				}
 
-				gtl_intersect.x += 1;
 				//////////////////////////////////////////////////////
 				//////////////////////////////////////////////////////
 			}
@@ -439,9 +463,9 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 	}
 }
 
+Vec3 lv = { 0,0,0 };
 
-
-void trace(Vec3& o, Vec3& r, Colour<float>& pixel)
+void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 {
 
 	Colour<float> tpixel = { 0.0f,0.0f,0.0f,0.0f };	// Temp RGB Values for this function
@@ -465,9 +489,29 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel)
 		float intercept = 0;
 
 		if (tob->pType == 1) {
-			// oX - rX, oY - rY, oZ - rZ
-			//intercept = InterPlaneOld(r.x, r.y, r.z, -tob->dA.x, -tob->dA.y, -tob->dA.z , -tob->dB.x, -tob->dB.y, -tob->dB.z , tob->s.x - r.x, tob->s.y - r.y, tob->s.z - r.z );
 			intercept = tob->InterPlane(o, r, gtl_intersect, gtl_surface_uv);
+			/*
+			float D = r.dot(tob->n);
+
+			if (D > 0) {
+				Vec3 sr = tob->s - o;
+				Vec3 tcross = sr.cross_product(r);  // scalar triple product
+				float D2 = tob->dB.dot(tcross);
+				if ((D2 >= 0) && (D2 <= D)) {
+					float D3 = -tob->dA.dot(tcross);
+
+					if (D3 > 0 && D3 < D) {
+						gtl_surface_uv.u = D2 / D;
+						gtl_surface_uv.v = D3 / D;
+						intercept = sr.dot(tob->n) / D;
+						gtl_intersect.x = o.x + r.x * intercept;
+						gtl_intersect.y = o.y + r.y * intercept;
+						gtl_intersect.z = o.z + r.z * intercept;
+					}
+
+				}
+			}
+			*/
 		}
 		else {
 			intercept = tob->InterSphere(o, r, g_camera_angle.y, gtl_intersect, gtl_surface_uv);
@@ -475,11 +519,12 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel)
 
 		if (intercept)
 		{
+
 			// We're searching for the nearest surface to the observer.
 			// all others are obscured.
-			lR = gtl_intersect.length_squared();				// faster than lR = sqrt((iX * iX) + (iY * iY) + (iZ * iZ));
+			lR = intercept; // gtl_intersect.length_squared();				// faster than lR = sqrt((iX * iX) + (iY * iY) + (iZ * iZ));
 
-			if (lR < R && gtl_intersect.z > 0)					// Compare with last
+			if (lR > 0 && lR < R)									// Compare with last
 			{
 				R = lR;											// This one is closer,
 				ii = gtl_intersect;								//
@@ -507,12 +552,30 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel)
 			//	- test if we can trace a direct path from light to surface.
 			//  - if so then calculate the intensity and colour of falling on our surface
 			//  - otherwise if the light cannot see surface it is casting a shadow (the absence of light)
+			/*
+			Vec3 pXNormal = { 0,0,0 };
+			if (MyFace->SurfaceTexture > -1) {
+				pXNormal = g_textures[MyFace->SurfaceTexture].get_normal(long((gtl_surface_uv_min.u * MyFace->SurfaceMultW) * g_textures[MyFace->SurfaceTexture].bmWidth), long((gtl_surface_uv_min.v * MyFace->SurfaceMultH) * g_textures[MyFace->SurfaceTexture].bmHeight));
+				if (MyFace->SurfaceTexture == 1)
+				{
+					pXNormal = pXNormal * 1;
+				}
+				ii = ii + pXNormal * 1000;
+			}
+			*/
+			Vec3 pXNormal = { 0,0,0 };
+			if (MyFace->SurfaceTexture != -1 && g_textures[MyFace->SurfaceTexture].pixels_normal)
+			{
+				pXNormal = g_textures[MyFace->SurfaceTexture].get_normal(long((gtl_surface_uv_min.u * MyFace->SurfaceMultW) * g_textures[MyFace->SurfaceTexture].bmWidth), long((gtl_surface_uv_min.v * MyFace->SurfaceMultH) * g_textures[MyFace->SurfaceTexture].bmHeight)); Colour<BYTE> pXColor = g_textures[MyFace->SurfaceTexture].get_pixel(long((gtl_surface_uv_min.u * MyFace->SurfaceMultW) * g_textures[MyFace->SurfaceTexture].bmWidth), long((gtl_surface_uv_min.v * MyFace->SurfaceMultH) * g_textures[MyFace->SurfaceTexture].bmHeight));
+			}
 
 			for (z_size_t LSX = 0; LSX < g_lights_active_cnt; LSX++)
 			{
 				float F = 1; // F represents intensity from 0 to 1.  (start with one for point lights)
 
-				Vec3 s_minus_ii = MyLS->s - ii;
+
+				Vec3 s_minus_ii = ii - MyLS->s;
+
 
 				if (MyLS->Type == 2)
 				{
@@ -521,7 +584,8 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel)
 					//
 					// First compute the angle between the light direction and Surface point.
 					//F = -CosAngle(MyLS->direction - MyLS->s , s_minus_ii);
-					F = -(MyLS->direction - MyLS->s).cos_angle(s_minus_ii);
+					
+					F = -(MyLS->s - MyLS->direction).cos_angle(s_minus_ii);
 					//F = s_minus_ii.cos_angle(MyLS->direction - MyLS->s);
 
 					// If the poly point is within the Cone size then
@@ -548,18 +612,30 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel)
 
 				// Get Cosine of light ray to surface normal (Lambert's cosine law)
 				// F will = 1 if the angle is 0 and F will = 0 if it is 90deg.
+
+
 				if (MyFace->pType == 2)
 				{
 					// For a sphere the surface normal (n) is the vector from the center to 
 					// the intersection point.
 					//F *= CosAngle(ii - MyFace->s, s_minus_ii);
-					F *= (ii - MyFace->s).cos_angle(s_minus_ii);
-				}
-				else {
+					F *= (MyFace->s - ii).cos_angle(s_minus_ii);
+
+				} else {
+
 					// For planes the normal is precomputed.
 					//F *= CosAngle(ii - MyFace->n, s_minus_ii);
-					F *= (ii - MyFace->n).cos_angle(s_minus_ii);
+					//F *= (ii - MyFace->n).cos_angle(s_minus_ii);
+					F *= (MyFace->nu).cos_angle(s_minus_ii);
+
+					if (MyFace->SurfaceTexture != -1 && g_textures[MyFace->SurfaceTexture].pixels_normal)
+					{
+						//F *= (pXNormal).cos_angle(s_minus_ii);
+					}
 				}
+
+				
+
 
 				// Calculate Shadows now, assuming the light actually has a potential effect on the surface.
 				if (F > 0 && F <= 1)
@@ -568,7 +644,10 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel)
 					// Now test if any other object is between the light source and the surface the ray hits.
 					// This is computationally quite expensive but there are some optimizations to be had.
 					//	- break from the loop on the first object we find (that we do here)
-					if (g_option_shadows == true && trace_light(MyLS, s_minus_ii, MyFace)) goto cont;
+					if (MyFace->idx == 24) {
+						MyFace->idx = 24;
+					}
+					if (g_option_shadows == true && trace_light(MyLS->s, s_minus_ii, MyFace)) goto cont;
 
 					// Add colour components to our pix value
 					F = F * 256;
@@ -593,8 +672,8 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel)
 		// Last step is to perform texturing of the surface point
 		if (MyFace->SurfaceTexture != -1 && g_option_textures)
 		{
-
 			Colour<BYTE> pXColor = g_textures[MyFace->SurfaceTexture].get_pixel(long((gtl_surface_uv_min.u * MyFace->SurfaceMultW) * g_textures[MyFace->SurfaceTexture].bmWidth), long((gtl_surface_uv_min.v * MyFace->SurfaceMultH) * g_textures[MyFace->SurfaceTexture].bmHeight));
+
 			pixel.r += (tpixel.r + g_light_ambient.r) * ((float(pXColor.r) / 255) * MyFace->colour.r);
 			pixel.g += (tpixel.g + g_light_ambient.g) * ((float(pXColor.g) / 255) * MyFace->colour.g);
 			pixel.b += (tpixel.b + g_light_ambient.b) * ((float(pXColor.b) / 255) * MyFace->colour.b);
@@ -609,14 +688,11 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel)
 			pixel.b += (tpixel.b + g_light_ambient.b) * MyFace->colour.b;
 
 		}
-
-
-
 	}
 	else {
-
-		pixel.r = 100 * (r.x + SCREEN_WIDTH / 2) / SCREEN_WIDTH;
-		pixel.b = 100 * (r.y + SCREEN_HEIGHT / 2) / SCREEN_HEIGHT;
+		pixel.g += r.z * 128; //  (+SCREEN_WIDTH / 2) / SCREEN_WIDTH;
+		pixel.r += r.x * 128; //  (r.x + SCREEN_WIDTH / 2) / SCREEN_WIDTH;
+		pixel.b += r.y * 128; //(r.y + SCREEN_HEIGHT / 2) / SCREEN_HEIGHT;
 	}
 
 
@@ -625,7 +701,7 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel)
 
 
 
-inline bool trace_light(Light* MyLS, Vec3 LSii, Object* OBJ)
+inline bool trace_light(Vec3& o, Vec3& r, Object* OBJ)
 {
 	//float ObAYBZ,ObAXBY,ObAXBZ,ObAZBY,ObAYBX;
 	Vec3 MOLS;
@@ -637,31 +713,36 @@ inline bool trace_light(Light* MyLS, Vec3 LSii, Object* OBJ)
 
 	// Sphere test specific vars.
 	float t;
-	Vec3 dir = -LSii;
-	float a = dir.dot(dir); // Assuming 'dir' is normalized, a = 1.
+	Vec3 dir = r.unitary();
+	//float a = 1; // dir.dot(dir); // Assuming 'dir' is normalized, a = 1.
 
 
 	while (cnt--)
 	{
+		Object* MyObb = &g_objects_shadowers[cnt];
 		if (MyObb != OBJ)
 		{
 			if (MyObb->pType == 2)	// Sphere
 			{
 
-				Vec3 L = MyObb->s - MyLS->s;
+				Vec3 L = MyObb->s - o;
 
 				float b = -2.0 * dir.dot(L);
 				float c = L.dot(L) - MyObb->radius_squared;	// dA.x is radius.
 
-				float discriminant = b * b - 4 * a * c;
-				if (discriminant < 0) continue; // No real roots: the ray misses the sphere.
+				float discriminant = b * b - 4 * c; // ( b * b - 4 * a * c) Assuming 'dir' is normalized, a = 1.
+				if (discriminant < 0) {
+					//MyObb++; 
+					continue;
+				}
+				 // No real roots: the ray misses the sphere.
 
 				if (b > 0) return false;
 
 				float sqrtDiscriminant = std::sqrt(discriminant);
 				// Two possible solutions for t.
-				float t0 = (-b - sqrtDiscriminant) / (2 * a);
-				float t1 = (-b + sqrtDiscriminant) / (2 * a);
+				float t0 = (-b - sqrtDiscriminant) / 2; // (2 * a)
+				float t1 = (-b + sqrtDiscriminant) / 2; // (2 * a)
 
 				// Ensure t0 is the smaller value.
 				if (t0 > t1)
@@ -671,7 +752,10 @@ inline bool trace_light(Light* MyLS, Vec3 LSii, Object* OBJ)
 
 				if (t0 < 0) {
 					if (t1 < 0) // Both intersections are behind the ray.
+					{
+						//MyObb++; 
 						continue;
+					}
 					t0 = t1;
 				}
 
@@ -679,59 +763,41 @@ inline bool trace_light(Light* MyLS, Vec3 LSii, Object* OBJ)
 
 			}
 			else {	// Plane.
-
-				D = LSii.dot(MyObb->n);
-
-				if (D > 0)
-				{
-					
-					MOLS = MyObb->s - MyLS->s;
-
-					// scalar triple product for plane height
-					Vec3 tcross = MOLS.cross_product(LSii);
-					D2 = MyObb->dB.dot(tcross);
-
-					D2 /= D;
-
-
-					if ((D2 >= 0) && (D2 <= 1))
-					{
-						
-						// scalar triple product for plane width
-						D3 = MyObb->dA.dot(tcross);
-
-						// use -D instead of recomputing tcross with vectors swapped because vec(A) x vec(B) = - vec(B) x vec(A).
-						// So our conditionals just need to check we're between -1 and 0 instead of 0 and 1.
-						D3 /= D;
-
-						if ((D3 >= -1) && (D3 <= 0))
-						{
+				
+				//if (MyObb->InterPlaneTest(o, r)) return true;
 							
-							D1 = MOLS.dot(MyObb->n) / D;
+				float D = r.dot(MyObb->nu);
 
-							if ((D1 >= -1) && (D1 <= 0))
-							{
-								return true;
-							}
-						}
+				if (D > 0) {
+					Vec3 sr = MyObb->s - o;
+					float D1 = sr.dot(MyObb->nu) / D;
+					if (D1 < 0 || D1 >= 1) continue;
+					Vec3 disp = r * D1 - sr;
+					uv_type uv;
+					uv.u = disp.dot(MyObb->dAu) / MyObb->dA_len;
+					if (uv.u < 0.0f || uv.u > 1.0f) continue;
+					uv.v = disp.dot(MyObb->dBu) / MyObb->dB_len;
+					if (uv.v >= 0.0f && uv.v <= 1.0f) {
+						return true;
 					}
-
 				}
+
 			}
 
 		}
-		MyObb++;
 	}
 
 	return false;
 
 }
 
+
+
 void threads_clear() {
 
 	// Tell threads it's time t go.
-	gatm_threads_exit_now.store(true);
-
+	//gatm_threads_exit_now.store(true);
+	/*
 	// Release them from pending wait states.
 	{
 		std::unique_lock<std::mutex> lock(gmtx_change_shared);
@@ -744,6 +810,23 @@ void threads_clear() {
 		gcv_thread_ready.wait(lock, [] { return gatm_threads_ready_cnt.load() == g_threads_allocated; });
 	}
 	{
+		std::unique_lock<std::mutex> lock(gmtx_change_shared);
+		gro_threads_render_now = true;
+		gcv_threads_render_now.notify_all();
+	}
+	*/
+
+	// this wil be true for rendering threads.
+	{	// wait for all threads to indicate they have initialised.
+		std::unique_lock<std::mutex> lock(gmtx_change_shared);
+		gcv_threads_wait.wait(lock, [] { return gatm_threads_waiting.load() == g_threads_allocated; });
+	}
+	{	// Wait for all threads to be in ready state.
+		std::unique_lock<std::mutex> lock(gmtx_change_shared);
+		gcv_thread_ready.wait(lock, [] { return gatm_threads_ready_cnt.load() == g_threads_allocated; });
+	}
+	gatm_threads_exit_now.store(true);
+	{	// Command threads to start rendering
 		std::unique_lock<std::mutex> lock(gmtx_change_shared);
 		gro_threads_render_now = true;
 		gcv_threads_render_now.notify_all();
@@ -784,9 +867,9 @@ void render_text_overlay(SDL_Renderer* renderer)
 	std::string debug_buffer = std::format("Move with arrows, (A)anti-aliasing={} - (T)extures={} - (S)hadows={} - (L)ights - (Z/X)Step={} (N/M)Threads={} - (1-7)Lights - (O/P) Focal distance={}", g_option_antialias, g_option_textures, g_option_shadows, g_screen_divisor, g_threads_requested, g_eye);
 	SDL_RenderDebugText(renderer, 0, 5, debug_buffer.c_str());
 
-	debug_buffer = std::format("{}x{} : {} fps, render {} - lowest {} ms (R)reset", SCREEN_WIDTH, SCREEN_HEIGHT, 1000 / g_fps_timer_low_pass_filter, g_render_timer, g_render_timer_lowest);
+	//debug_buffer = std::format("{}x{} : {} fps, render {} - lowest {} ms (R)reset", SCREEN_WIDTH, SCREEN_HEIGHT, 1000 / g_fps_timer_low_pass_filter, g_render_timer, g_render_timer_lowest);
 	//Longer one for camera debug.
-	//debug_buffer = std::format("{}x{} : {} fps, render {}/{} ms - cam fp {} {} {}, s {} {} {}, A {} {} {}, B {} {} {}, n {} {} {}", SCREEN_WIDTH, SCREEN_HEIGHT, 1000 / g_fps_timer_low_pass_filter, g_render_timer, g_render_timer_lowest, g_camera.fp.x, g_camera.fp.y, g_camera.fp.z, g_camera.screen.s.x, g_camera.screen.s.y, g_camera.screen.s.z, g_camera.screen.dA.x, g_camera.screen.dA.y, g_camera.screen.dA.z, g_camera.screen.dB.x, g_camera.screen.dB.y, g_camera.screen.dB.z, g_camera.screen.n.x, g_camera.screen.n.y, g_camera.screen.n.z);
+	debug_buffer = std::format("{}x{} : {} fps, render {}/{} ms - cam fp {} {} {}, s {} {} {}, A {} {} {}, B {} {} {}, n {} {} {}", SCREEN_WIDTH, SCREEN_HEIGHT, 1000 / g_fps_timer_low_pass_filter, g_render_timer, g_render_timer_lowest, g_camera.fp.x, g_camera.fp.y, g_camera.fp.z, g_camera.screen.s.x, g_camera.screen.s.y, g_camera.screen.s.z, g_camera.screen.dAu.x, g_camera.screen.dAu.y, g_camera.screen.dAu.z, g_camera.screen.dBu.x, g_camera.screen.dBu.y, g_camera.screen.dBu.z, g_camera.screen.nu.x, g_camera.screen.nu.y, g_camera.screen.nu.z);
 	//Output(L"te=%d\n\r", tmr_render);
 
 	SDL_RenderDebugText(renderer, 0, 20, debug_buffer.c_str());
@@ -812,77 +895,50 @@ inline void rotate_world()
 	// Reset camera before translation.
 	set_plane(g_camera.screen, 0, 0, -static_cast <float>(g_eye), 1, 0, 0, 0, 1, 0);
 	g_camera.fp = { 0, 0, 0 };
-	g_camera.screen.n = g_camera.screen.dA.cross_product(g_camera.screen.dB);
-	g_camera.screen.s.x = g_camera.screen.s.x; g_camera.screen.s.y = g_camera.screen.s.y; g_camera.screen.s.z = g_camera.screen.s.z;
+	//g_camera.fp.x 
 
 	Matrix44 mtrx;
+	
 	mtrx.ident();
 	mtrx.rotate(g_camera_angle);
+	mtrx.translate(g_camera_position);
+	mtrx.transform(g_camera.screen.s);
+	mtrx.transform(g_camera.fp);
+
+
+	mtrx.ident();
+	mtrx.rotate(g_camera_angle);
+	
+	mtrx.transform(g_camera.screen.dA);
+	mtrx.transform(g_camera.screen.dB);
+
+	g_camera.screen.n = g_camera.screen.dA.cross_product(g_camera.screen.dB);
+	g_camera.screen.nu = g_camera.screen.n.unitary();
+
 	long b=0,c=0;
 
-	for(z_size_t a=0;a<g_objects_cnt;a++)
+	for (z_size_t a = 0; a < g_objects_cnt; a++)
 	{
 		g_objects_shadowers[b] = g_objects[a];
-		g_objects_shadowers[b].s = g_objects_shadowers[b].s - g_camera_position;
-	
-		mtrx.transform(g_objects_shadowers[b].s);
-
-		// Kill polys that are further then 2000 units away.
-		
-		//if(g_objects_shadowers[b].s.length() < 10000)
-		//{
-			if(g_objects_shadowers[b].pType == 1)
-			{
-				// recompute plane normals.
-				mtrx.transform(g_objects_shadowers[b].dA);
-				mtrx.transform(g_objects_shadowers[b].dB);
-				g_objects_shadowers[b].n = g_objects_shadowers[b].dA.cross_product(g_objects_shadowers[b].dB);
-			}
-
-			if (object_in_frustum(g_objects_shadowers[b]) == true)
-			{
-				//// remove polygons that we cant see.
-				//float ca = CosAngle(g_objects_shadowers[b].s + g_objects_shadowers[b].n, g_objects_shadowers[b].s);
-				float ca = (g_objects_shadowers[b].s + g_objects_shadowers[b].n).cos_angle(g_objects_shadowers[b].s);
-				if (g_objects_shadowers[b].pType == 2 || ca >= 0.0f)
-				{
-					g_objects_in_view[c] = &g_objects_shadowers[b];	
-					c++;
-				}
-
-					
-			}	
-			b++;
-		//}
+		g_objects_in_view[c] = &g_objects_shadowers[b];
+		c++;
+		b++;
 	}
 	g_objects_shadowers_cnt = b;
 	g_objects_in_view_cnt = c;
 
 	b = 0;
-	for(z_size_t a=0;a<g_lights_cnt;a++)
+	for (z_size_t a = 0; a < g_lights_cnt; a++)
 	{
-		if(g_lights[a].Enabled)
+		if (g_lights[a].Enabled)
 		{
 			g_lights_active[b] = g_lights[a];
-			g_lights_active[b].s -= g_camera_position;
-			
-			mtrx.transform(g_lights_active[b].s);
-
-			//if(g_lights_active[b].s.length() <2000)
-			//{
-				//if(light_in_frustum(g_lights_active[b]))
-				//{
-					if(g_lights_active[b].Type == 2)
-					{
-						g_lights_active[b].direction -= g_camera_position;
-						mtrx.transform(g_lights_active[b].direction);
-					}
-					b++;
-				//}
-			//}
+			b++;
 		}
 	}
 	g_lights_active_cnt = b;
+
+	return;
 }
 
 
@@ -930,6 +986,7 @@ inline void set_plane(Object& Mesh, float X1, float Y1, float Z1, float X2, floa
 	Mesh.s = { X1, Y1 , Z1 };
 	Mesh.dA = { X2, Y2, Z2 };
 	Mesh.dB = { X3, Y3 ,Z3 };
+	Mesh.pre_compute();
 }
 
 inline z_size_t create_plane(float X1, float Y1, float Z1, float X2, float Y2, float Z2, float X3, float Y3, float Z3)
@@ -939,11 +996,17 @@ inline z_size_t create_plane(float X1, float Y1, float Z1, float X2, float Y2, f
 
 	set_plane(Mesh, X1, Y1, Z1, X2, Y2, Z2, X3, Y3, Z3);
 
+
+
+	
+
 	g_objects_cnt += 1;
+	
 	return g_objects_cnt - 1;
 
 	//CalcNorm(Mesh);
 	//Mesh.n = Mesh.dA.normal(Mesh.dB);
+	
 }
 
 inline z_size_t create_sphere(float X1, float Y1, float Z1, float R)
@@ -1006,28 +1069,28 @@ inline z_size_t create_box(float X1, float Y1, float Z1, float wX1, float wY1, f
 
 void process_inputs(void)
 {
-	g_movement_multiplier = 0.5f;
-	if (key_get(SDL_SCANCODE_LSHIFT)) g_movement_multiplier = 2.0f;
-	else if (key_get(SDL_SCANCODE_LCTRL)) g_movement_multiplier = 0.3f;
+	g_movement_multiplier = 2.0f;
+	if (key_get(SDL_SCANCODE_LSHIFT)) g_movement_multiplier = 5.0f;
+	else if (key_get(SDL_SCANCODE_LCTRL)) g_movement_multiplier = 0.5f;
 
 	if (key_get(SDL_SCANCODE_LEFT))
 	{
-		g_camera_angle.y += 4.0f * g_movement_multiplier;
+		g_camera_angle.y -= 4.0f * g_movement_multiplier;
 	}
 	if (key_get(SDL_SCANCODE_RIGHT))
 	{
-		g_camera_angle.y -= 4.0f * g_movement_multiplier;
+		g_camera_angle.y += 4.0f * g_movement_multiplier;
 	}
 	if (key_get(SDL_SCANCODE_UP))
 	{
-		g_camera_position.z += MyCos(g_camera_angle.y) * 15.0f * g_movement_multiplier;
-		g_camera_position.x -= MySin(g_camera_angle.y) * 15.0f * g_movement_multiplier;
+		g_camera_position.x -= MySin(-g_camera_angle.y) * 15.0f * g_movement_multiplier;
+		g_camera_position.z += MyCos(-g_camera_angle.y) * 15.0f * g_movement_multiplier;
 	}
 
 	if (key_get(SDL_SCANCODE_DOWN))
 	{
-		g_camera_position.z -= MyCos(g_camera_angle.y) * 15.0f * g_movement_multiplier;
-		g_camera_position.x += MySin(g_camera_angle.y) * 15.0f * g_movement_multiplier;
+		g_camera_position.x += MySin(-g_camera_angle.y) * 15.0f * g_movement_multiplier;
+		g_camera_position.z -= MyCos(-g_camera_angle.y) * 15.0f * g_movement_multiplier;
 	}
 
 	if (key_get(SDL_SCANCODE_Y))
@@ -1066,6 +1129,11 @@ void process_inputs(void)
 	if (key_get_clear(SDL_SCANCODE_8)) g_lights[7].Enabled = !g_lights[7].Enabled;
 	if (key_get_clear(SDL_SCANCODE_9)) g_lights[8].Enabled = !g_lights[8].Enabled;
 	if (key_get_clear(SDL_SCANCODE_0)) g_lights[9].Enabled = !g_lights[9].Enabled;
+
+	if (key_get(SDL_SCANCODE_Q)) lv.x -= 1;
+	if (key_get(SDL_SCANCODE_W)) lv.x += 1;
+
+	
 
 	if (key_get_clear(SDL_SCANCODE_R)) g_render_timer_lowest = 10000;
 
@@ -1131,38 +1199,40 @@ void hide_all_ugly_init_stuff(void)
 
 	a = 9; g_lights[a].Type = 1;
 	g_lights[a].Enabled = true;
-	g_lights[a].s.x = 350.0f; g_lights[a].s.y = 10.0f;  g_lights[a].s.z = 280.0f;
+	g_lights[a].s.x = 350.0f; g_lights[a].s.y = -90.0f;  g_lights[a].s.z = 300.0f;
 	g_lights[a].colour.r = 0.8f; g_lights[a].colour.g = 0.8f; g_lights[a].colour.b = 0.8f;
 	g_lights[a].direction.x = 350.0f; g_lights[a].direction.y = 10.0f;  g_lights[a].direction.z = 299.0f; g_lights[a].Cone = 0.9f;
 	g_vending_light_idx = 9;
 
-
 	g_lights_cnt = a + 1;
 	/*
-	for (a = 0; a < g_light_cnt; a++)
+	for (a = 0; a < g_lights_cnt; a++)
 	{
-		if(a!=1) g_lights[a].Enabled = false;
+		if(a!=9) g_lights[a].Enabled = false;
 	}
 	*/
-
 	// Done.
 
 		//walls
 	float sa = 0.7f;
 	g_objects_cnt = 0;
-
+	/*		*/
 	a = create_plane(600, -100, -2800, 0, 0, 3200, -1000, 0, 0);  g_objects[a].colour.r = sa; g_objects[a].colour.g = sa; g_objects[a].colour.b = sa; // ceiling
+	//a = create_plane(-400, -100, -2800, 1000, 0, 0, 0, 0, 3200);  g_objects[a].colour.r = sa; g_objects[a].colour.g = sa; g_objects[a].colour.b = sa;
 	g_objects[a].SurfaceTexture = 0; g_objects[a].SurfaceMultW = 5.3f; g_objects[a].SurfaceMultH = 1.305f;
+	//g_objects[a].n.y = -g_objects[a].n.y;
+	//g_objects[a].nu.y = -g_objects[a].nu.y;
 
 	a = create_plane(-400, 100, -2800, 0, 0, 3200, 1000, 0, 0);  g_objects[a].colour.r = sa; g_objects[a].colour.g = sa; g_objects[a].colour.b = sa; // floor
 	g_objects[a].SurfaceTexture = 2; g_objects[a].SurfaceMultW = 4.0f; g_objects[a].SurfaceMultH = 3.0f;
-
+	
 	a = create_plane(-400, -100, -400, 0, 0, 800, 0, 200, 0);  g_objects[a].colour.r = sa; g_objects[a].colour.g = sa; g_objects[a].colour.b = sa; // wall left
 	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 1.8f; g_objects[a].SurfaceMultH = 1.0f;
 
 	a = create_plane(400, -100, 400, 0, 0, -800, 0, 200, 0);  g_objects[a].colour.r = sa; g_objects[a].colour.g = sa; g_objects[a].colour.b = sa; // wall right
 	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 1.8f; g_objects[a].SurfaceMultH = 1.0f;
 
+	// front wall.
 	a = create_plane(-400, -100, 400, 800, 0, 0, 0, 200, 0);  g_objects[a].colour.r = sa; g_objects[a].colour.g = sa; g_objects[a].colour.b = sa; // wall front.
 	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 1.8f; g_objects[a].SurfaceMultH = 1.0f;
 
@@ -1182,7 +1252,9 @@ void hide_all_ugly_init_stuff(void)
 		g_objects[b].SurfaceTexture = -1; g_objects[b].colour.b = 0.8f; g_objects[b].colour.g = 0.8f; g_objects[b].colour.r = 0.8f;
 	}
 
+
 	// vending machine.	
+
 	a = create_box(250, -80, 280, 100, 180, 100, 3, 1, 1);
 	g_objects[a].SurfaceTexture = 4;	g_objects[a].SurfaceMultW = 1.0f;	g_objects[a].SurfaceMultH = 1.0f;	// front face.
 	g_objects[a].colour.b = 1.0f;		g_objects[a].colour.g = 1.0f;		g_objects[a].colour.r = 1.0f;
@@ -1194,23 +1266,27 @@ void hide_all_ugly_init_stuff(void)
 
 
 
-
+	// Hall left
 	a = create_plane(-100, -100, -1000, 0, 0, 600, 0, 200, 0);  g_objects[a].colour.r = 1.0f; g_objects[a].colour.g = 1.0f; g_objects[a].colour.b = 1.0f;
 	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 1.8f; g_objects[a].SurfaceMultH = 1.0f;
 
+	// Hall right
 	a = create_plane(100, -100, -400, 0, 0, -600, 0, 200, 0);  g_objects[a].colour.r = 1.0f; g_objects[a].colour.g = 1.0f; g_objects[a].colour.b = 1.0f;
 	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 1.8f; g_objects[a].SurfaceMultH = 1.0f;
 
+	//back wall.
 	a = create_plane(400, -100, -1200, -800, 0, 0, 0, 200, 0);  g_objects[a].colour.r = 1.0f; g_objects[a].colour.g = 1.0f; g_objects[a].colour.b = 1.0f;
 	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 2.4f; g_objects[a].SurfaceMultH = 1.0f;
 
 
-
+	// hall 2 left
 	a = create_plane(-400, -100, -1000, 300, 0, 0, 0, 200, 0);  g_objects[a].colour.r = 1.0f; g_objects[a].colour.g = 1.0f; g_objects[a].colour.b = 1.0f;
 	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 1.8f; g_objects[a].SurfaceMultH = 1.0f;
 
+	// hall 2 right
 	a = create_plane(100, -100, -1000, 500, 0, 0, 0, 200, 0);  g_objects[a].colour.r = 1.0f; g_objects[a].colour.g = 1.0f; g_objects[a].colour.b = 1.0f;
 	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 1.5f; g_objects[a].SurfaceMultH = 1.0f;
+
 
 	a = create_plane(-400, -100, -1200, 0, 0, 200, 0, 200, 0);  g_objects[a].colour.r = 1.0f; g_objects[a].colour.g = 1.0f; g_objects[a].colour.b = 1.0f;
 	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 0.6f; g_objects[a].SurfaceMultH = 1.0f;
@@ -1230,14 +1306,17 @@ void hide_all_ugly_init_stuff(void)
 
 	g_box_texture = 5;
 	g_box_idx = create_box(-25, 50, -25, 50, 40, 50, g_box_texture, 0.2, 0.2);
+
+
 	
 	// Try load the textures....
-
-	const wchar_t* texture_files[] = { L"tiles_0013_color_1k.bmp", L"hr_wall.bmp", L"pexels-pixabay-268976.bmp", L"bttf.bmp", L"corkvending.ie.bmp",  L"gift.bmp" , L"panda3.bmp" };
+	//L"hr_wall.bmp"
+	const wchar_t* texture_files[] = { L"tiles_0013_color_1k.bmp", L"stone/StoneBricksSplitface001_COL_2K.bmp", L"pexels-pixabay-268976.bmp", L"bttf.bmp", L"corkvending.ie.bmp",  L"gift.bmp" , L"panda3.bmp"};
+	const wchar_t* normal_files[]  = { 0, L"stone/StoneBricksSplitface001_NRM_2K.bmp", 0, 0, 0, 0, 0};
 	g_textures_cnt = 7;
 	for (a = 0; a < g_textures_cnt; a++)
 	{
-		if (!load_texture(g_textures[a], texture_files[a], false))
+		if (!load_texture(g_textures[a], texture_files[a], normal_files[a]))
 		{
 			if (a == g_box_texture) {
 				g_box_texture = -1;

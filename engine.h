@@ -8,7 +8,7 @@ void deinit_world();
 void main_loop(Colour<BYTE>* src_pixels);
 void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax);
 void trace(Vec3& o, Vec3& r, Colour<float>& pixel);
-inline bool trace_light(Light* MyLS, Vec3 LSii, Object* OBJ);
+inline bool trace_light(Vec3& o, Vec3& r, Object* OBJ);
 void threads_clear();
 void render_text_overlay(SDL_Renderer* renderer);
 inline void rotate_world();

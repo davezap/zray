@@ -10,6 +10,12 @@ typedef unsigned int z_screen_t;	// used for x an y coordinates in to textures a
 typedef unsigned char BYTE;
 
 
+struct uv_type
+{
+	float u = 0.0f, v = 0.0f;
+};
+
+
 // Vector struct and all related vector math.
 struct Vec3 {
 
@@ -98,9 +104,9 @@ struct Vec3 {
 
 	void inline roll360()
 	{
-		x = static_cast<int>(x) % 360;
-		y = static_cast<int>(y) % 360;
-		z = static_cast<int>(z) % 360;
+		x = fmod(x, 360.0f);
+		y = fmod(y, 360.0f);
+		z = fmod(z, 360.0f);
 	}
 
 
@@ -142,6 +148,13 @@ struct Matrix44 {
 	{
 		float rmat[4][4];
 
+		// X
+		rmat[0][0] = 1;		rmat[0][1] = 0;				rmat[0][2] = 0;				rmat[0][3] = 0;
+		rmat[1][0] = 0;		rmat[1][1] = MyCos(Ang.x);	rmat[1][2] = MySin(Ang.x);	rmat[1][3] = 0;
+		rmat[2][0] = 0;		rmat[2][1] = -MySin(Ang.x);	rmat[2][2] = MyCos(Ang.x);	rmat[2][3] = 0;
+		rmat[3][0] = 0;		rmat[3][1] = 0;				rmat[3][2] = 0;				rmat[3][3] = 1;
+		multiply(rmat);
+
 		// Z
 		rmat[0][0] = MyCos(Ang.z);	rmat[0][1] = MySin(Ang.z);	rmat[0][2] = 0;		rmat[0][3] = 0;
 		rmat[1][0] = -MySin(Ang.z);	rmat[1][1] = MyCos(Ang.z);	rmat[1][2] = 0;		rmat[1][3] = 0;
@@ -156,12 +169,8 @@ struct Matrix44 {
 		rmat[3][0] = 0;				rmat[3][1] = 0;		rmat[3][2] = 0;				rmat[3][3] = 1;
 		multiply(rmat);
 
-		// X
-		rmat[0][0] = 1;		rmat[0][1] = 0;				rmat[0][2] = 0;				rmat[0][3] = 0;
-		rmat[1][0] = 0;		rmat[1][1] = MyCos(Ang.x);	rmat[1][2] = MySin(Ang.x);	rmat[1][3] = 0;
-		rmat[2][0] = 0;		rmat[2][1] = -MySin(Ang.x);	rmat[2][2] = MyCos(Ang.x);	rmat[2][3] = 0;
-		rmat[3][0] = 0;		rmat[3][1] = 0;				rmat[3][2] = 0;				rmat[3][3] = 1;
-		multiply(rmat);
+
+
 	}
 
 	inline void translate(Vec3& p)
@@ -218,6 +227,14 @@ struct Colour {
 		//a = static_cast <BYTE>(fcolour.a);
 	}
 
+	inline Vec3 toNormal() const {
+		return {
+			(static_cast<float>(r) - 255) / 127,
+			(static_cast<float>(g) - 255) / 127,
+			(static_cast<float>(b) - 255) / 127
+		};
+	}
+
 	inline void limit_rgba() {
 		if (r < 0) r = 0;
 		if (g < 0) g = 0;
@@ -232,10 +249,6 @@ struct Colour {
 };
 
 
-struct uv_type
-{
-	float u = 0.0f, v = 0.0f;
-};
 
 // Our object structure defined either a plane or sphere. 
 struct Object
@@ -244,44 +257,184 @@ struct Object
 	int pType;
 	Vec3 s;
 	Vec3 dA;
+	float dA_len;
 	Vec3 dB;
+	float dB_len;
+	Vec3 dAu;
+	Vec3 dBu;
 	Colour<float> colour;
 	Vec3 n;
+	Vec3 nu;
 	long SurfaceTexture;
 	float SurfaceMultW;
 	float SurfaceMultH;
 	float radius_squared;
 
+	inline void pre_compute() {
+		dA_len = dA.length();
+		dAu = dA.unitary();
+		dB_len = dB.length();
+		dBu = dB.unitary();
+		n = dA.cross_product(dB);
+		nu = n.unitary();
+		
+	}
+
+	inline float InterPlaneNew2(const Vec3& o, const Vec3& r, Vec3& out_intersect, uv_type& uv)
+	{
+		// r and n are assumed to be normalized.
+		float D = r.dot(nu);
+
+		// Check if the ray is heading towards the plane (using a small epsilon to avoid float issues)
+		if (D > 1e-6) {
+			Vec3 sr = s - o; // vector from ray origin to a known point on the plane
+			float D1 = sr.dot(nu);
+			float L = D1 / D;  // Intersection parameter along the ray
+
+			if (L < 0) {
+				out_intersect = { 0, 0, 0 };
+				return 0;
+			}
+
+			// Calculate the intersection point: p = o + r * L
+			out_intersect = o + r * L;
+
+			// Compute displacement from the plane's reference point
+			Vec3 disp = out_intersect - s;
+
+			// Normalize the basis vectors for UV mapping
+			float dA_length = dA.length();
+			float dB_length = dB.length();
+			Vec3 dA_unit = dA / dA_length;
+			Vec3 dB_unit = dB / dB_length;
+
+			// Project disp onto the normalized vectors and then normalize by the extent lengths
+			uv.u = disp.dot(dA_unit) / dA_length;
+			uv.v = disp.dot(dB_unit) / dB_length;
+
+			// Project disp onto the plane's basis vectors to compute UV coordinates.
+			// (Assumes dA and dB are appropriately scaled to the plane's dimensions.)
+			//uv.u = disp.dot(dA);
+			//uv.v = disp.dot(dB);
+
+			// If the UV coordinates are within the valid range, return L (or another appropriate value)
+			if (uv.u >= 0.0f && uv.u <= 1.0f && uv.v >= 0.0f && uv.v <= 1.0f) {
+				return L;
+			}
+		}
+
+		// If no valid intersection is found, reset the intersection point and return 0.
+		out_intersect = { 0, 0, 0 };
+		return 0;
+	}
+
+	inline float InterPlaneNew(const Vec3& o, const Vec3& r, Vec3& out_intersect, uv_type& uv)
+	{
+		// r and n are assumed to be normalized.
+		float D = r.dot(nu);
+
+		// Check if the ray is heading towards the plane (using a small epsilon to avoid float issues)
+		if (D > 1e-6) {
+			Vec3 sr = s - o; // vector from ray origin to a known point on the plane
+			float D1 = sr.dot(nu);
+			float L = D1 / D;  // Intersection parameter along the ray
+
+			if (L < 0) {
+				out_intersect = { 0, 0, 0 };
+				return 0;
+			}
+
+			// Calculate the intersection point: p = o + r * L
+			out_intersect = o + r * L;
+
+			// Compute displacement from the plane's reference point
+			Vec3 disp = out_intersect - s;
+
+			// Normalize the basis vectors for UV mapping
+
+			// Project disp onto the normalized vectors and then normalize by the extent lengths
+			uv.u = disp.dot(dAu);
+			uv.v = disp.dot(dBu);
+
+			// Project disp onto the plane's basis vectors to compute UV coordinates.
+			// (Assumes dA and dB are appropriately scaled to the plane's dimensions.)
+			//uv.u = disp.dot(dA);
+			//uv.v = disp.dot(dB);
+
+			// If the UV coordinates are within the valid range, return L (or another appropriate value)
+			if (uv.u >= 0.0f && uv.u <= dA_len && uv.v >= 0.0f && uv.v <= dB_len) {
+				uv.u /= dA_len;
+				uv.v /= dB_len;
+				return L;
+			}
+		}
+
+		// If no valid intersection is found, reset the intersection point and return 0.
+		out_intersect = { 0, 0, 0 };
+		return 0;
+	}
+	//626 to 613
 	inline float InterPlane(Vec3 &o, Vec3 &r, Vec3 &out_intersect, uv_type &uv)
 	{
 		float D = r.dot(n);
 
 		if (D > 0) {
+			Vec3 sr = s-o;
+			Vec3 tcross = sr.cross_product(r);  // scalar triple product
+			float D2 = dB.dot(tcross);			
+			if ((D2 < 0) || (D2 > D)) return 0;
+			float D3 = -dA.dot(tcross);
 
-			Vec3 sr = s - r;
-			
-			Vec3 tcross = sr.cross_product(r);  // scalar triple product for plane height
-			float D2 = dB.dot(tcross);
-
-			uv.u = D2 / D;
-			if ((uv.u >= 0) && (uv.u <= 1)) {
-				float D3 = -dA.dot(tcross);
-
+			if (D3 > 0 && D3 < D) {
+				uv.u = D2 / D;
 				uv.v = D3 / D;
-
-				if ((uv.v >= 0) && (uv.v <= 1)) {
-
-					float D1 = sr.dot(n);
-					float L = D1 / D;
-					out_intersect.x = r.x + r.x * L;
-					out_intersect.y = r.y + r.y * L;
-					out_intersect.z = r.z + r.z * L;
-					return -D;
-				}
+				float L = sr.dot(n) / D;
+				out_intersect.x = o.x + r.x * L;
+				out_intersect.y = o.y + r.y * L;
+				out_intersect.z = o.z + r.z * L;
+				return L;
 			}
+
 		}
 		out_intersect = { 0,0,0 };
 		return 0;
+	}
+	
+	inline bool InterPlaneTest(const Vec3& o, const Vec3& r)
+	{
+		float D = r.dot(nu);
+		if (D <= 0) return false;
+
+		// Check if the ray is heading towards the plane (using a small epsilon to avoid float issues)
+		Vec3 sr = s - o; // vector from ray origin to a known point on the plane
+		float D1 = sr.dot(nu) / D;
+
+		if (D1 < 0 || D1 >= 1) return false;
+
+		// Calculate the intersection point: p = o + r * L
+		//Vec3 out_intersect = o + r * L;
+
+		// Compute displacement from the plane's reference point
+		Vec3 disp = r * D1 - sr;
+
+		// Project disp onto the normalized vectors and then normalize by the extent lengths
+		uv_type uv;
+		uv.u = disp.dot(dAu) / dA.length();
+		if (uv.u < 0.0f || uv.u > 1.0f) return false;
+
+		uv.v = disp.dot(dBu) / dB.length();
+
+		// Project disp onto the plane's basis vectors to compute UV coordinates.
+		// (Assumes dA and dB are appropriately scaled to the plane's dimensions.)
+		//uv.u = disp.dot(dA);
+		//uv.v = disp.dot(dB);
+
+		// If the UV coordinates are within the valid range, return L (or another appropriate value)
+		if (uv.v >= 0.0f && uv.v <= 1.0f) {
+			return true;
+		}
+
+		return false;
 	}
 
 
@@ -329,7 +482,7 @@ struct Object
 
 		//intercept = unit_vector(intercept);
 		float qx = intercept.x, qy = intercept.y, qz = intercept.z;
-		worldToLocal(intercept.x, intercept.y, intercept.z, an_Y * 0.0174533, qx, qy, qz);
+		worldToLocal(intercept.x, intercept.y, intercept.z, 0.5*an_Y * 0.0174533, qx, qy, qz);
 
 
 
@@ -406,8 +559,9 @@ struct polygon_type
 struct cTexture
 {
 	std::wstring filename;
-	SDL_Surface* surface = NULL;
-	Colour<BYTE>* pixels = NULL;
+	Colour<BYTE>* pixels_colour = NULL;
+	Vec3* pixels_normal = NULL;
+
 	unsigned char bmBitsPixel = 0;
 	unsigned char bmBytesPixel = 0;
 	uint16_t bmHeight = 0;
@@ -421,7 +575,15 @@ struct cTexture
 	{
 		x %= bmWidth;
 		y %= bmHeight;
-		return pixels[x + y * bmWidth];
+		return pixels_colour[x + y * bmWidth];
+	}
+
+	inline Vec3 get_normal(z_screen_t x, z_screen_t y)
+	{
+		if (pixels_normal == NULL) return { 0,0,0 };
+		x %= bmWidth;
+		y %= bmHeight;
+		return pixels_normal[x + y * bmWidth];
 	}
 };
 

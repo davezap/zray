@@ -385,7 +385,7 @@ struct Object
 			if ((D2 < 0) || (D2 > D)) return 0;
 			float D3 = -dA.dot(tcross);
 
-			if (D3 > 0 && D3 < D) {
+			if (D3 >= 0 && D3 <= D) {
 				uv.u = D2 / D;
 				uv.v = D3 / D;
 				float L = sr.dot(n) / D;

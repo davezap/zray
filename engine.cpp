@@ -106,9 +106,6 @@ bool g_option_textures;
 // Demo specific variables..///////
  
 z_size_t g_sky_texture_idx;		// Skybox texture, if any.
-bool g_vending_flicker_state = false;
-z_size_t g_vending_light_idx;
-z_size_t g_vending_object_idx;		// Vending machine front face poly.
 z_size_t g_box_idx = 0;		// spinning cube!! 
 Vec3 box_angle = { 0,0,0 };
 z_size_t g_box_texture = -1;
@@ -202,36 +199,6 @@ void main_loop(Colour<BYTE>* src_pixels)
 	}
 	
 
-	// Flicker vending machine.
-	// ** It's actually very annoying and looks like a bug.
-	if(0) {
-		float m = 1.0f;
-		float l = 0.8f;
-		int r = std::rand() % 100;
-		if (r < 3 && !g_vending_flicker_state) // 1% chance it will turn off.
-			g_vending_flicker_state = false;
-		//else if (r < 10 && g_vending_flicker_state) // 20% if will turn back on again.
-			//g_vending_flicker_state = false;
-
-		if (g_vending_flicker_state || g_lights[9].Enabled == false)
-		{
-			m = 0.4f;
-			l = 0.1f;
-		}
-		g_lights[g_vending_light_idx].colour = { 0, l, l, l };
-		g_objects[g_vending_object_idx].colour = { 0, m, m, m };
-	}
-	else {
-		float m = 0.7f;
-		float l = 0.7f;
-		if (g_lights[9].Enabled == false)
-		{
-			m = 0.4f;
-			l = 0.1f;
-		}
-		g_lights[g_vending_light_idx].colour = { 0, l, l, l };
-		g_objects[g_vending_object_idx].colour = { 0, m, m, m };
-	}
 
 	rotate_world();
 
@@ -1176,9 +1143,13 @@ void hide_all_ugly_init_stuff(void)
 	a = 3; g_lights[a].Type = 1;
 	g_lights[a].Enabled = true;
 	g_lights[a].s.x = -380.0f; g_lights[a].s.y = -50.0f;  g_lights[a].s.z = 380.0f; g_lights[a].colour.r = 0.2f; g_lights[a].colour.g = 0.2f; g_lights[a].colour.b = 0.2f;
-	a = 4; g_lights[a].Type = 1;
+
+	a = 4; g_lights[a].Type = 2;
 	g_lights[a].Enabled = true;
-	g_lights[a].s.x = 380.0f; g_lights[a].s.y = -50.0f;  g_lights[a].s.z = 280.0f; g_lights[a].colour.r = 0.2f; g_lights[a].colour.g = 0.2f; g_lights[a].colour.b = 0.2f;
+	g_lights[a].s.x = 0.0f; g_lights[a].s.y = 55.0f;  g_lights[a].s.z = 0.0f;
+	g_lights[a].colour.r = 0.5f; g_lights[a].colour.g = 0.4f; g_lights[a].colour.b = 0.5f;
+	g_lights[a].direction.x = 0.0f; g_lights[a].direction.y = 10.0f;  g_lights[a].direction.z = 0.0f; g_lights[a].Cone = 0.9f;
+
 	a = 5; g_lights[a].Type = 1;
 	g_lights[a].Enabled = true;
 	g_lights[a].s.x = -380.0f; g_lights[a].s.y = -50.0f;  g_lights[a].s.z = -380.0f; g_lights[a].colour.r = 0.2f; g_lights[a].colour.g = 0.2f; g_lights[a].colour.b = 0.3f;
@@ -1199,10 +1170,10 @@ void hide_all_ugly_init_stuff(void)
 
 	a = 9; g_lights[a].Type = 1;
 	g_lights[a].Enabled = true;
-	g_lights[a].s.x = 350.0f; g_lights[a].s.y = -90.0f;  g_lights[a].s.z = 300.0f;
+	g_lights[a].s.x = 350.0f; g_lights[a].s.y = -95.0f;  g_lights[a].s.z = 350.0f;
 	g_lights[a].colour.r = 0.8f; g_lights[a].colour.g = 0.8f; g_lights[a].colour.b = 0.8f;
 	g_lights[a].direction.x = 350.0f; g_lights[a].direction.y = 10.0f;  g_lights[a].direction.z = 299.0f; g_lights[a].Cone = 0.9f;
-	g_vending_light_idx = 9;
+	
 
 	g_lights_cnt = a + 1;
 	/*
@@ -1216,7 +1187,7 @@ void hide_all_ugly_init_stuff(void)
 		//walls
 	float sa = 0.7f;
 	g_objects_cnt = 0;
-	/*		*/
+	/**/
 	a = create_plane(600, -100, -2800, 0, 0, 3200, -1000, 0, 0);  g_objects[a].colour.r = sa; g_objects[a].colour.g = sa; g_objects[a].colour.b = sa; // ceiling
 	//a = create_plane(-400, -100, -2800, 1000, 0, 0, 0, 0, 3200);  g_objects[a].colour.r = sa; g_objects[a].colour.g = sa; g_objects[a].colour.b = sa;
 	g_objects[a].SurfaceTexture = 0; g_objects[a].SurfaceMultW = 5.3f; g_objects[a].SurfaceMultH = 1.305f;

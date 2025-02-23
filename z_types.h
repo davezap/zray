@@ -2,8 +2,11 @@
 
 #include <string>
 #include <SDL3/SDL.h>
-
 #include "z_math.h"
+
+//#include "json.hpp"
+
+//using json::JSON;
 
 typedef unsigned int z_size_t;
 typedef unsigned int z_screen_t;	// used for x an y coordinates in to textures and the display
@@ -108,7 +111,14 @@ struct Vec3 {
 		y = fmod(y, 360.0f);
 		z = fmod(z, 360.0f);
 	}
-
+	/*
+	inline void fromJSON(JSON& j)
+	{
+		x = static_cast<float>(j.at(0).ToFloat());
+		y = static_cast<float>(j.at(1).ToFloat());
+		z = static_cast<float>(j.at(2).ToFloat());
+	}
+	*/
 
 };
 
@@ -217,6 +227,13 @@ struct Colour {
 
 	inline Colour<T>& operator/=(float t) {
 		return *this *= 1 / t;
+	}
+
+	inline void operator+=(Colour<T>& c) {
+		r += c.r;
+		g += c.g;
+		b += c.b;
+		a += c.a;
 	}
 
 	inline void fromFloatC(Colour<float> fcolour)

@@ -1,16 +1,21 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include <cstdlib>
+#include <string>
 #include <format>
 #include <iostream>
+#include <fstream>
 #include <thread>
 #include <vector>
 #include <atomic>
 #include <mutex>
+#include "json.hpp"
 
 #include "z_types.h"
 #include "z_helpers.h"
 #include "config.h"
 #include "engine.h"
+
+using json::JSON;
 
 
 #define SCREEN_LEN SCREEN_WIDTH * SCREEN_HEIGHT
@@ -24,7 +29,7 @@ int g_fps_timer_low_pass_filter = 0;
 
 long g_eye;						// fp distance from screen
 long gro_eye;					// read only copy for threads if needed.
-Colour<BYTE> g_light_ambient;	// global additive illumination 
+Colour<float> g_light_ambient;	// global additive illumination 
 
 thread_local Vec3  gtl_intersect;	// ray plane intersection point
 thread_local uv_type gtl_surface_uv;
@@ -106,10 +111,10 @@ bool g_option_textures;
 // Demo specific variables..///////
  
 z_size_t g_sky_texture_idx;		// Skybox texture, if any.
-z_size_t g_box_idx = 0;		// spinning cube!! 
 Vec3 box_angle = { 0,0,0 };
+z_size_t g_box_idx = 0;		// spinning cube!! 
 z_size_t g_box_texture = -1;
-
+z_size_t g_panda_ball_idx = -1;
 
 
 
@@ -139,7 +144,7 @@ bool init_world()
 	g_option_textures = true;
 	g_option_lighting = true;
 
-	g_light_ambient = { 255, 40,40,40};
+	g_light_ambient = { 1.0, 20.0, 20.0, 20.0 };
 
 	hide_all_ugly_init_stuff();
 
@@ -169,7 +174,14 @@ void main_loop(Colour<BYTE>* src_pixels)
 	process_inputs();
 
 	z_size_t a = 0;
-
+	if (g_panda_ball_idx != -1)
+	{
+		if (g_objects[g_panda_ball_idx].radius_squared <= 8000)
+		{
+			g_objects[g_panda_ball_idx].radius_squared *= 1 + (8050 - g_objects[g_panda_ball_idx].radius_squared) / 40000;
+			g_objects[g_panda_ball_idx].s.y = 100 - std::sqrtf(g_objects[g_panda_ball_idx].radius_squared);
+		}
+	}
 	
 	box_angle.z += 0.1f;
 	box_angle.y += 1.0f;
@@ -181,10 +193,11 @@ void main_loop(Colour<BYTE>* src_pixels)
 	mtrx.rotate(box_angle);
 	//Vec3 p = { -25, -25, -25 };
 	//mtrx.translate(p);
-	a = g_objects_cnt;
+
+	z_size_t oldcnt = g_objects_cnt;
 	g_objects_cnt = g_box_idx;
-	create_box(-25, -25, -25, 50, 50, 50, g_box_texture, 1, 1);
-	g_objects_cnt = a;
+	create_box({ -25, -25, -25 }, { 50, 50, 50 }, { 1.0, 0.7, 0.7, 0.7 }, g_box_texture, { 1, 1});
+	g_objects_cnt = g_box_idx;
 	for (a = g_box_idx; a < g_box_idx + 6; a++)
 	{
 		mtrx.transform(g_objects[a].s);
@@ -197,8 +210,7 @@ void main_loop(Colour<BYTE>* src_pixels)
 		//Ob[a].n = -Ob[a].dA.normal(Ob[a].dB);
 		//CalcNorm(Ob[a]);
 	}
-	
-
+	g_objects_cnt = oldcnt;
 
 	rotate_world();
 
@@ -456,8 +468,8 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 		float intercept = 0;
 
 		if (tob->pType == 1) {
-			intercept = tob->InterPlane(o, r, gtl_intersect, gtl_surface_uv);
-			/*
+			//intercept = tob->InterPlane(o, r, gtl_intersect, gtl_surface_uv);
+			
 			float D = r.dot(tob->n);
 
 			if (D > 0) {
@@ -478,11 +490,15 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 
 				}
 			}
-			*/
+			
 		}
 		else {
 			intercept = tob->InterSphere(o, r, g_camera_angle.y, gtl_intersect, gtl_surface_uv);
+			
+		
+
 		}
+	sp_out:
 
 		if (intercept)
 		{
@@ -621,7 +637,6 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 					tpixel.r += (MyLS->colour.r * F);
 					tpixel.g += (MyLS->colour.g * F);
 					tpixel.b += (MyLS->colour.b * F);
-
 				}
 			cont:
 				MyLS++;
@@ -636,27 +651,31 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 		}
 
 
+		tpixel += g_light_ambient;
+
+
 		// Last step is to perform texturing of the surface point
 		if (MyFace->SurfaceTexture != -1 && g_option_textures)
 		{
 			Colour<BYTE> pXColor = g_textures[MyFace->SurfaceTexture].get_pixel(long((gtl_surface_uv_min.u * MyFace->SurfaceMultW) * g_textures[MyFace->SurfaceTexture].bmWidth), long((gtl_surface_uv_min.v * MyFace->SurfaceMultH) * g_textures[MyFace->SurfaceTexture].bmHeight));
 
-			pixel.r += (tpixel.r + g_light_ambient.r) * ((float(pXColor.r) / 255) * MyFace->colour.r);
-			pixel.g += (tpixel.g + g_light_ambient.g) * ((float(pXColor.g) / 255) * MyFace->colour.g);
-			pixel.b += (tpixel.b + g_light_ambient.b) * ((float(pXColor.b) / 255) * MyFace->colour.b);
+			pixel.r += (tpixel.r) * ((float(pXColor.r) / 255) * MyFace->colour.r);
+			pixel.g += (tpixel.g) * ((float(pXColor.g) / 255) * MyFace->colour.g);
+			pixel.b += (tpixel.b) * ((float(pXColor.b) / 255) * MyFace->colour.b);
 
 		}
 		else {
 			// Ok, now add background illumination as a light source
 			// and scale the whole thing based on the surface color
 
-			pixel.r += (tpixel.r + g_light_ambient.r) * MyFace->colour.r;
-			pixel.g += (tpixel.g + g_light_ambient.g) * MyFace->colour.g;
-			pixel.b += (tpixel.b + g_light_ambient.b) * MyFace->colour.b;
+			pixel.r += (tpixel.r) * MyFace->colour.r;
+			pixel.g += (tpixel.g) * MyFace->colour.g;
+			pixel.b += (tpixel.b) * MyFace->colour.b;
 
 		}
 	}
 	else {
+		// Sky.
 		pixel.g += r.z * 128; //  (+SCREEN_WIDTH / 2) / SCREEN_WIDTH;
 		pixel.r += r.x * 128; //  (r.x + SCREEN_WIDTH / 2) / SCREEN_WIDTH;
 		pixel.b += r.y * 128; //(r.y + SCREEN_HEIGHT / 2) / SCREEN_HEIGHT;
@@ -860,7 +879,7 @@ inline void rotate_world()
 {
 
 	// Reset camera before translation.
-	set_plane(g_camera.screen, 0, 0, -static_cast <float>(g_eye), 1, 0, 0, 0, 1, 0);
+	set_plane(g_camera.screen, { 0, 0, -static_cast <float>(g_eye) }, { 1, 0, 0 }, { 0, 1, 0 });
 	g_camera.fp = { 0, 0, 0 };
 	//g_camera.fp.x 
 
@@ -941,52 +960,46 @@ inline bool light_in_frustum(Light& light)
 
 
 
-
-
-inline void set_plane(Object& Mesh, float X1, float Y1, float Z1, float X2, float Y2, float Z2, float X3, float Y3, float Z3)
-{
-
+inline void set_plane(Object& Mesh, Vec3 s, Vec3 da, Vec3 db) {
 	Mesh.pType = 1;
 	Mesh.SurfaceTexture = -1;
 	Mesh.SurfaceMultH = 1;
 	Mesh.SurfaceMultW = 1;
-	Mesh.s = { X1, Y1 , Z1 };
-	Mesh.dA = { X2, Y2, Z2 };
-	Mesh.dB = { X3, Y3 ,Z3 };
+	Mesh.s = s;
+	Mesh.dA = da;
+	Mesh.dB = db;
 	Mesh.pre_compute();
 }
 
-inline z_size_t create_plane(float X1, float Y1, float Z1, float X2, float Y2, float Z2, float X3, float Y3, float Z3)
-{
+inline z_size_t create_plane(Vec3 s, Vec3 da, Vec3 db, Colour<float> c, z_size_t tx, uv_type tx_mult) {
 	Object& Mesh = g_objects[g_objects_cnt];
 	Mesh.idx = g_objects_cnt;
 
-	set_plane(Mesh, X1, Y1, Z1, X2, Y2, Z2, X3, Y3, Z3);
+	set_plane(Mesh, s, da, db);
+	Mesh.SurfaceTexture = tx;
+	Mesh.SurfaceMultW = tx_mult.u;
+	Mesh.SurfaceMultH = tx_mult.v;
+	Mesh.colour = c;
 
-
-
-	
 
 	g_objects_cnt += 1;
-	
+
 	return g_objects_cnt - 1;
 
-	//CalcNorm(Mesh);
-	//Mesh.n = Mesh.dA.normal(Mesh.dB);
-	
 }
 
-inline z_size_t create_sphere(float X1, float Y1, float Z1, float R)
+inline z_size_t create_sphere(Vec3 s, float radius, Colour<float> c, z_size_t tx, uv_type tx_mult)
 {
 	Object& Mesh = g_objects[g_objects_cnt];
 	Mesh.idx = g_objects_cnt;
 
 	Mesh.pType = 2;
-	Mesh.SurfaceTexture = -1;
-	Mesh.SurfaceMultH = 1;
-	Mesh.SurfaceMultW = 1;
-	Mesh.s = { X1, Y1, Z1 };
-	Mesh.radius_squared = R * R;
+	Mesh.SurfaceTexture = tx;
+	Mesh.SurfaceMultW = tx_mult.u;
+	Mesh.SurfaceMultH = tx_mult.v;
+	Mesh.colour = c;
+	Mesh.s = s;
+	Mesh.radius_squared = radius * radius;
 
 	g_objects_cnt += 1;
 	return g_objects_cnt - 1;
@@ -994,35 +1007,19 @@ inline z_size_t create_sphere(float X1, float Y1, float Z1, float R)
 }
 
 
-inline z_size_t create_box(float X1, float Y1, float Z1, float wX1, float wY1, float wZ1, long SurfaceTexture, float SurfaceMultH, float SurfaceMultW)
+inline z_size_t create_box(Vec3 s, Vec3 e, Colour<float> c, z_size_t tx, uv_type tx_mult)
 {
 	z_size_t StartInd = 0;
 
-	StartInd = create_plane(X1 + wX1, Y1 + wY1, Z1, -wX1, 0, 0, 0, -wY1, 0);
-	g_objects[StartInd].colour.r = 1; g_objects[StartInd].colour.g = 1; g_objects[StartInd].colour.b = 1;
-	g_objects[StartInd].SurfaceTexture = SurfaceTexture; g_objects[StartInd].SurfaceMultH = SurfaceMultH; g_objects[StartInd].SurfaceMultW = SurfaceMultW;
+	StartInd = create_plane({ s.x + e.x, s.y + e.y, s.z }, { -e.x, 0, 0 }, { 0, -e.y, 0 }, c, tx,tx_mult);
 
-	StartInd = create_plane(X1 + wX1, Y1, Z1 + wZ1, -wX1, 0, 0, 0, wY1, 0);
-	g_objects[StartInd].colour.r = 1; g_objects[StartInd].colour.g = 1; g_objects[StartInd].colour.b = 1;
-	g_objects[StartInd].SurfaceTexture = SurfaceTexture; g_objects[StartInd].SurfaceMultH = SurfaceMultH; g_objects[StartInd].SurfaceMultW = SurfaceMultW;
-
+	StartInd = create_plane({ s.x + e.x, s.y, s.z + e.z }, { -e.x, 0, 0 }, { 0, e.y, 0 }, c, tx, tx_mult);
 	// Top
-	StartInd = create_plane(X1 + wX1, Y1, Z1, -wX1, 0, 0, 0, 0, wZ1);
-	g_objects[StartInd].colour.r = 1; g_objects[StartInd].colour.g = 1; g_objects[StartInd].colour.b = 1;
-	g_objects[StartInd].SurfaceTexture = SurfaceTexture; g_objects[StartInd].SurfaceMultH = SurfaceMultH; g_objects[StartInd].SurfaceMultW = SurfaceMultW;
-
+	StartInd = create_plane({ s.x + e.x, s.y, s.z }, { -e.x, 0, 0 }, { 0, 0, e.z }, c, tx, tx_mult);
 	// Bottom
-	StartInd = create_plane(X1, wY1 + Y1, Z1, wX1, 0, 0, 0, 0, wZ1);
-	g_objects[StartInd].colour.r = 1; g_objects[StartInd].colour.g = 1; g_objects[StartInd].colour.b = 1;
-	g_objects[StartInd].SurfaceTexture = SurfaceTexture; g_objects[StartInd].SurfaceMultH = SurfaceMultH; g_objects[StartInd].SurfaceMultW = SurfaceMultW;
-
-	StartInd = create_plane(X1, Y1, Z1, 0, wY1, 0, 0, 0, wZ1);
-	g_objects[StartInd].colour.r = 1; g_objects[StartInd].colour.g = 1; g_objects[StartInd].colour.b = 1;
-	g_objects[StartInd].SurfaceTexture = SurfaceTexture; g_objects[StartInd].SurfaceMultH = SurfaceMultH; g_objects[StartInd].SurfaceMultW = SurfaceMultW;
-
-	StartInd = create_plane(X1 + wX1, Y1 + wY1, Z1, 0, -wY1, 0, 0, 0, wZ1);
-	g_objects[StartInd].colour.r = 1; g_objects[StartInd].colour.g = 1; g_objects[StartInd].colour.b = 1;
-	g_objects[StartInd].SurfaceTexture = SurfaceTexture; g_objects[StartInd].SurfaceMultH = SurfaceMultH; g_objects[StartInd].SurfaceMultW = SurfaceMultW;
+	StartInd = create_plane({ s.x, e.y + s.y, s.z }, { e.x, 0, 0 }, { 0, 0, e.z }, c, tx, tx_mult);
+	StartInd = create_plane({ s.x, s.y, s.z }, { 0, e.y, 0 }, { 0, 0, e.z }, c, tx, tx_mult);
+	StartInd = create_plane({ s.x + e.x, s.y + e.y, s.z }, { 0, -e.y, 0 }, { 0, 0, e.z }, c, tx, tx_mult);
 
 	return StartInd - 5;
 }
@@ -1116,66 +1113,98 @@ void process_inputs(void)
 }
 
 
+
+void fromJSON(Vec3& v, JSON& j)
+{
+	if(j.at(0).JSONType() == JSON::Class::Integral)
+		v.x = static_cast<float>(j.at(0).ToInt());
+	else
+		v.x = static_cast<float>(j.at(0).ToFloat());
+
+	if (j.at(1).JSONType() == JSON::Class::Integral)
+		v.y = static_cast<float>(j.at(1).ToInt());
+	else
+		v.y = static_cast<float>(j.at(1).ToFloat());
+
+	if (j.at(2).JSONType() == JSON::Class::Integral)
+		v.z = static_cast<float>(j.at(2).ToInt());
+	else
+		v.z = static_cast<float>(j.at(2).ToFloat());
+}
+
+void fromJSONColour(Colour<float>& c, JSON& j)
+{
+	if (j.at(0).JSONType() == JSON::Class::Integral)
+		c.r = static_cast<float>(j.at(0).ToInt());
+	else
+		c.r = static_cast<float>(j.at(0).ToFloat());
+
+	if (c.r == -1) {
+		c = { 1, 0.7f , 0.7f , 0.7f};
+		return;
+	}
+
+	if (j.at(1).JSONType() == JSON::Class::Integral)
+		c.g = static_cast<float>(j.at(1).ToInt());
+	else
+		c.g = static_cast<float>(j.at(1).ToFloat());
+	
+	if (j.at(2).JSONType() == JSON::Class::Integral)
+		c.b = static_cast<float>(j.at(2).ToInt());
+	else
+		c.b = static_cast<float>(j.at(2).ToFloat());
+
+	if (j.at(3).JSONType() == JSON::Class::Integral)
+		c.a = static_cast<float>(j.at(3).ToInt());
+	else
+		c.a = static_cast<float>(j.at(3).ToFloat());
+}
+
+void fromJSONUV(uv_type& v, JSON& j)
+{
+	if (j.at(0).JSONType() == JSON::Class::Integral)
+		v.u = static_cast<float>(j.at(0).ToInt());
+	else
+		v.u = static_cast<float>(j.at(0).ToFloat());
+
+	if (j.at(1).JSONType() == JSON::Class::Integral)
+		v.v = static_cast<float>(j.at(1).ToInt());
+	else
+		v.v = static_cast<float>(j.at(1).ToFloat());
+
+
+}
+
+
 void hide_all_ugly_init_stuff(void)
 {
 	z_size_t a = 0;
+	g_lights_cnt = 0;
+	std::string file = "world.json";
 
+	std::ifstream t("world.json");
+	std::string str((std::istreambuf_iterator<char>(t)),
+		std::istreambuf_iterator<char>());
 
-	// Lights...
+	JSON world = JSON::Load(str);
+	//JSON lights = world.
+	std::cout << world.dump();
+	for (auto& j : world.at("lights").ArrayRange())
+	{
+		g_lights[g_lights_cnt].Type = j["type"].ToInt();
+		g_lights[g_lights_cnt].Enabled = j["enabled"].ToBool();
+		fromJSON(g_lights[g_lights_cnt].s, j["s"]);
+		fromJSONColour(g_lights[g_lights_cnt].colour, j["colour"]);
+		if (g_lights[g_lights_cnt].Type == 2) {
+			fromJSON(g_lights[g_lights_cnt].direction, j["n"]);
+			g_lights[g_lights_cnt].Cone = static_cast<float>(j["cone"].ToFloat());
+			g_lights[g_lights_cnt].FuzFactor = static_cast<float>(j["falloff"].ToFloat());
+		}
+		
+		g_lights_cnt++;
+	}
 
-	a = 0; g_lights[a].Type = 1;
-	g_lights[a].Enabled = true;
-	g_lights[a].s.x = -0.0f;  g_lights[a].s.y = -60.0f;  g_lights[a].s.z = 0.0f;
-	g_lights[a].colour.r = 0.8f; g_lights[a].colour.g = 0.8f; g_lights[a].colour.b = 0.6f;
-
-	a = 1; g_lights[a].Type = 2;
-	g_lights[a].Enabled = true;
-	g_lights[a].s.x = -0.0f;  g_lights[a].s.y = -80.0f; g_lights[a].s.z = 0.0f;
-	g_lights[a].colour.r = 0.6f; g_lights[a].colour.g = 0.0f; g_lights[a].colour.b = 0.0f;
-	g_lights[a].direction.x = 0.0f; g_lights[a].direction.y = 50.0f;  g_lights[a].direction.z = 400.0f; g_lights[a].Cone = 0.3f;
-	g_lights[a].FuzFactor = 0.4f;
-
-	a = 2; g_lights[a].Type = 2;
-	g_lights[a].Enabled = true;
-	g_lights[a].s.x = -0.0f; g_lights[a].s.y = -80.0f;  g_lights[a].s.z = 0.0f; g_lights[a].colour.r = 0.0f; g_lights[a].colour.g = 0.0f; g_lights[a].colour.b = 0.6f;
-	g_lights[a].direction.x = 400.0f; g_lights[a].direction.y = 50.0f;  g_lights[a].direction.z = 400.0f; g_lights[a].Cone = 0.3f;
-	g_lights[a].FuzFactor = 0.4f;
-	a = 3; g_lights[a].Type = 1;
-	g_lights[a].Enabled = true;
-	g_lights[a].s.x = -380.0f; g_lights[a].s.y = -50.0f;  g_lights[a].s.z = 380.0f; g_lights[a].colour.r = 0.2f; g_lights[a].colour.g = 0.2f; g_lights[a].colour.b = 0.2f;
-
-	a = 4; g_lights[a].Type = 2;
-	g_lights[a].Enabled = true;
-	g_lights[a].s.x = 0.0f; g_lights[a].s.y = 55.0f;  g_lights[a].s.z = 0.0f;
-	g_lights[a].colour.r = 0.5f; g_lights[a].colour.g = 0.4f; g_lights[a].colour.b = 0.5f;
-	g_lights[a].direction.x = 0.0f; g_lights[a].direction.y = 10.0f;  g_lights[a].direction.z = 0.0f; g_lights[a].Cone = 0.9f;
-
-	a = 5; g_lights[a].Type = 1;
-	g_lights[a].Enabled = true;
-	g_lights[a].s.x = -380.0f; g_lights[a].s.y = -50.0f;  g_lights[a].s.z = -380.0f; g_lights[a].colour.r = 0.2f; g_lights[a].colour.g = 0.2f; g_lights[a].colour.b = 0.3f;
-	a = 6; g_lights[a].Type = 1;
-	g_lights[a].Enabled = true;
-	g_lights[a].s.x = 380.0f; g_lights[a].s.y = -50.0f;  g_lights[a].s.z = -380.0f; g_lights[a].colour.r = 0.5f; g_lights[a].colour.g = 0.5f; g_lights[a].colour.b = 0.2f;
-	a = 6; g_lights[a].Type = 1;
-	g_lights[a].Enabled = true;
-	g_lights[a].s.x = 380.0f; g_lights[a].s.y = -50.0f;  g_lights[a].s.z = -380.0f; g_lights[a].colour.r = 0.2f; g_lights[a].colour.g = 0.5f; g_lights[a].colour.b = 0.2f;
-	a = 7; g_lights[a].Type = 2;
-	g_lights[a].Enabled = true;
-	g_lights[a].s.x = 0.0f; g_lights[a].s.y = -90.0f;  g_lights[a].s.z = -900.0f; g_lights[a].colour.r = 0.8f; g_lights[a].colour.g = 0.4f; g_lights[a].colour.b = 0.4f;
-	g_lights[a].direction.x = 0.0f; g_lights[a].direction.y = 90.0f;  g_lights[a].direction.z = -1100.0f; g_lights[a].Cone = 0.5f;
-	g_lights[a].FuzFactor = 0.6f;
-	a = 8; g_lights[a].Type = 1;
-	g_lights[a].Enabled = true;
-	g_lights[a].s.x = 500.0f; g_lights[a].s.y = -50.0f;  g_lights[a].s.z = -1300.0f; g_lights[a].colour.r = 0.5f; g_lights[a].colour.g = 0.5f; g_lights[a].colour.b = 0.5f;
-
-	a = 9; g_lights[a].Type = 1;
-	g_lights[a].Enabled = true;
-	g_lights[a].s.x = 350.0f; g_lights[a].s.y = -95.0f;  g_lights[a].s.z = 350.0f;
-	g_lights[a].colour.r = 0.8f; g_lights[a].colour.g = 0.8f; g_lights[a].colour.b = 0.8f;
-	g_lights[a].direction.x = 350.0f; g_lights[a].direction.y = 10.0f;  g_lights[a].direction.z = 299.0f; g_lights[a].Cone = 0.9f;
-	
-
-	g_lights_cnt = a + 1;
+	//g_lights_cnt = a+1 ;
 	/*
 	for (a = 0; a < g_lights_cnt; a++)
 	{
@@ -1187,103 +1216,77 @@ void hide_all_ugly_init_stuff(void)
 		//walls
 	float sa = 0.7f;
 	g_objects_cnt = 0;
-	/**/
-	a = create_plane(600, -100, -2800, 0, 0, 3200, -1000, 0, 0);  g_objects[a].colour.r = sa; g_objects[a].colour.g = sa; g_objects[a].colour.b = sa; // ceiling
-	//a = create_plane(-400, -100, -2800, 1000, 0, 0, 0, 0, 3200);  g_objects[a].colour.r = sa; g_objects[a].colour.g = sa; g_objects[a].colour.b = sa;
-	g_objects[a].SurfaceTexture = 0; g_objects[a].SurfaceMultW = 5.3f; g_objects[a].SurfaceMultH = 1.305f;
-	//g_objects[a].n.y = -g_objects[a].n.y;
-	//g_objects[a].nu.y = -g_objects[a].nu.y;
 
-	a = create_plane(-400, 100, -2800, 0, 0, 3200, 1000, 0, 0);  g_objects[a].colour.r = sa; g_objects[a].colour.g = sa; g_objects[a].colour.b = sa; // floor
-	g_objects[a].SurfaceTexture = 2; g_objects[a].SurfaceMultW = 4.0f; g_objects[a].SurfaceMultH = 3.0f;
-	
-	a = create_plane(-400, -100, -400, 0, 0, 800, 0, 200, 0);  g_objects[a].colour.r = sa; g_objects[a].colour.g = sa; g_objects[a].colour.b = sa; // wall left
-	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 1.8f; g_objects[a].SurfaceMultH = 1.0f;
-
-	a = create_plane(400, -100, 400, 0, 0, -800, 0, 200, 0);  g_objects[a].colour.r = sa; g_objects[a].colour.g = sa; g_objects[a].colour.b = sa; // wall right
-	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 1.8f; g_objects[a].SurfaceMultH = 1.0f;
-
-	// front wall.
-	a = create_plane(-400, -100, 400, 800, 0, 0, 0, 200, 0);  g_objects[a].colour.r = sa; g_objects[a].colour.g = sa; g_objects[a].colour.b = sa; // wall front.
-	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 1.8f; g_objects[a].SurfaceMultH = 1.0f;
-
-	a = create_plane(400, -100, -400, -300, 0, 0, 0, 200, 0);  g_objects[a].colour.r = sa; g_objects[a].colour.g = sa; g_objects[a].colour.b = sa; // back right
-	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 0.9f; g_objects[a].SurfaceMultH = 1.0f;
-
-	a = create_plane(-100, -100, -400, -300, 0, 0, 0, 200, 0);  g_objects[a].colour.r = sa; g_objects[a].colour.g = sa; g_objects[a].colour.b = sa; // back left
-	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 0.9f; g_objects[a].SurfaceMultH = 1.0f;
-
-	a = create_plane(398, -50, 250, 0, 0, -141, 0, 100, 0);  g_objects[a].colour.r = sa; g_objects[a].colour.g = sa; g_objects[a].colour.b = sa; // painting.
-	g_objects[a].SurfaceTexture = 3; g_objects[a].SurfaceMultW = 1.0f; g_objects[a].SurfaceMultH = 1.0f;
-
-	// plinth.
-	a = create_box(-25, 50, -25, 50, 40, 50, 0.2, 0.2, 0.2);
-	for (int b = a; b < a+6; b++)
+	for (auto& j : world.at("objects").ArrayRange())
 	{
-		g_objects[b].SurfaceTexture = -1; g_objects[b].colour.b = 0.8f; g_objects[b].colour.g = 0.8f; g_objects[b].colour.r = 0.8f;
+		int t =j["type"].ToInt();
+		if (t == 1) {
+			Vec3 s, da, db;
+			Colour<float> c;
+			z_size_t tx = j["texture"].ToInt();
+			uv_type tx_uv;
+			fromJSONUV(tx_uv, j["uvm"]);
+			fromJSON(s, j["s"]);
+			fromJSON(da, j["da"]);
+			fromJSON(db, j["db"]);
+			fromJSONColour(c, j["colour"]);
+			
+			create_plane(s, da, db, c, tx, tx_uv);
+		}
+		else if (t == 2) {
+			Vec3 s;
+			Colour<float> c;
+			float radius = j["r"].ToFloat();
+			z_size_t tx = j["texture"].ToInt();
+			uv_type tx_uv;
+			fromJSONUV(tx_uv, j["uvm"]);
+			fromJSON(s, j["s"]);
+			fromJSONColour(c, j["colour"]);
+			int a = create_sphere(s, radius, c, tx, tx_uv);
+			if (j["desc"].ToString() == "panda ball") {
+				g_panda_ball_idx = a;
+			}
+		}
+		else if (t == 3) {
+			Vec3 s, e;
+			Colour<float> c;
+			z_size_t tx = j["texture"].ToInt();
+			uv_type tx_uv;
+			fromJSONUV(tx_uv, j["uvm"]);
+			fromJSON(s, j["s"]);
+			fromJSON(e, j["e"]);
+			fromJSONColour(c, j["colour"]);
+			int a = create_box(s, e, c, tx, tx_uv);
+
+			if (j["desc"].ToString() == "vending") {
+				g_objects[a].SurfaceTexture = 4;	g_objects[a].SurfaceMultW = 1.0f;	g_objects[a].SurfaceMultH = 1.0f;	// front face.
+				g_objects[a].colour.b = 1.0f;		g_objects[a].colour.g = 1.0f;		g_objects[a].colour.r = 1.0f;
+			}
+			else if (j["desc"].ToString() == "spinbox") {
+				g_box_texture = 5;
+				g_box_idx = a;
+			}
+
+		}
 	}
-
-
-	// vending machine.	
-
-	a = create_box(250, -80, 280, 100, 180, 100, 3, 1, 1);
-	g_objects[a].SurfaceTexture = 4;	g_objects[a].SurfaceMultW = 1.0f;	g_objects[a].SurfaceMultH = 1.0f;	// front face.
-	g_objects[a].colour.b = 1.0f;		g_objects[a].colour.g = 1.0f;		g_objects[a].colour.r = 1.0f;
-	g_objects[a + 1].SurfaceTexture = -1; g_objects[a + 1].colour.b = 0.2f; g_objects[a + 1].colour.g = 0.2f; g_objects[a + 1].colour.r = 0.2f;
-	g_objects[a + 2].SurfaceTexture = -1; g_objects[a + 2].colour.b = 0.2f; g_objects[a + 2].colour.g = 0.2f; g_objects[a + 2].colour.r = 0.2f;
-	g_objects[a + 3].SurfaceTexture = -1; g_objects[a + 3].colour.b = 0.2f; g_objects[a + 3].colour.g = 0.2f; g_objects[a + 3].colour.r = 0.2f;
-	g_objects[a + 4].SurfaceTexture = -1; g_objects[a + 4].colour.b = 0.2f; g_objects[a + 4].colour.g = 0.2f; g_objects[a + 4].colour.r = 0.2f;
-	g_objects[a + 5].SurfaceTexture = -1;  g_objects[a + 5].colour.b = 0.2f; g_objects[a + 5].colour.g = 0.2f; g_objects[a + 5].colour.r = 0.2f;
-
-
-
-	// Hall left
-	a = create_plane(-100, -100, -1000, 0, 0, 600, 0, 200, 0);  g_objects[a].colour.r = 1.0f; g_objects[a].colour.g = 1.0f; g_objects[a].colour.b = 1.0f;
-	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 1.8f; g_objects[a].SurfaceMultH = 1.0f;
-
-	// Hall right
-	a = create_plane(100, -100, -400, 0, 0, -600, 0, 200, 0);  g_objects[a].colour.r = 1.0f; g_objects[a].colour.g = 1.0f; g_objects[a].colour.b = 1.0f;
-	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 1.8f; g_objects[a].SurfaceMultH = 1.0f;
-
-	//back wall.
-	a = create_plane(400, -100, -1200, -800, 0, 0, 0, 200, 0);  g_objects[a].colour.r = 1.0f; g_objects[a].colour.g = 1.0f; g_objects[a].colour.b = 1.0f;
-	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 2.4f; g_objects[a].SurfaceMultH = 1.0f;
-
-
-	// hall 2 left
-	a = create_plane(-400, -100, -1000, 300, 0, 0, 0, 200, 0);  g_objects[a].colour.r = 1.0f; g_objects[a].colour.g = 1.0f; g_objects[a].colour.b = 1.0f;
-	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 1.8f; g_objects[a].SurfaceMultH = 1.0f;
-
-	// hall 2 right
-	a = create_plane(100, -100, -1000, 500, 0, 0, 0, 200, 0);  g_objects[a].colour.r = 1.0f; g_objects[a].colour.g = 1.0f; g_objects[a].colour.b = 1.0f;
-	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 1.5f; g_objects[a].SurfaceMultH = 1.0f;
-
-
-	a = create_plane(-400, -100, -1200, 0, 0, 200, 0, 200, 0);  g_objects[a].colour.r = 1.0f; g_objects[a].colour.g = 1.0f; g_objects[a].colour.b = 1.0f;
-	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 0.6f; g_objects[a].SurfaceMultH = 1.0f;
-
-
-
-	a = create_plane(400, -100, -2800, 0, 0, 1600, 0, 200, 0);  g_objects[a].colour.r = 1.0f; g_objects[a].colour.g = 1.0f; g_objects[a].colour.b = 1.0f;
-	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 4.8f; g_objects[a].SurfaceMultH = 1.0f;
-
-	a = create_plane(600, -100, -1000, 0, 0, -1800, 0, 200, 0);  g_objects[a].colour.r = 1.0f; g_objects[a].colour.g = 1.0f; g_objects[a].colour.b = 1.0f;
-	g_objects[a].SurfaceTexture = 1; g_objects[a].SurfaceMultW = 5.4f; g_objects[a].SurfaceMultH = 1.0f;
+	
+	
+	
 
 	// Sphere test.
-	a = create_sphere(-200, 0, 200, 100);
-	g_objects[a].colour.r = 0.5f; g_objects[a].colour.g = 0.5f; g_objects[a].colour.b = 0.5f;
-	g_objects[a].SurfaceTexture = 6; g_objects[a].SurfaceMultW = 4.0f; g_objects[a].SurfaceMultH = -4.0f;
+	//a = create_sphere(-200, 0, 200, 100);
+	//g_objects[a].colour.r = 0.5f; g_objects[a].colour.g = 0.5f; g_objects[a].colour.b = 0.5f;
+	//g_objects[a].SurfaceTexture = 6; g_objects[a].SurfaceMultW = 4.0f; g_objects[a].SurfaceMultH = -4.0f;
 
-	g_box_texture = 5;
-	g_box_idx = create_box(-25, 50, -25, 50, 40, 50, g_box_texture, 0.2, 0.2);
+	
+	//g_box_idx = create_box(-25, 50, -25, 50, 40, 50, g_box_texture, 0.2, 0.2);
 
 
 	
 	// Try load the textures....
 	//L"hr_wall.bmp"
 	const wchar_t* texture_files[] = { L"tiles_0013_color_1k.bmp", L"stone/StoneBricksSplitface001_COL_2K.bmp", L"pexels-pixabay-268976.bmp", L"bttf.bmp", L"corkvending.ie.bmp",  L"gift.bmp" , L"panda3.bmp"};
-	const wchar_t* normal_files[]  = { 0, L"stone/StoneBricksSplitface001_NRM_2K.bmp", 0, 0, 0, 0, 0};
+	const wchar_t* normal_files[]  = { 0,                          L"stone/StoneBricksSplitface001_NRM_2K.bmp", 0, 0, 0, 0, 0};
 	g_textures_cnt = 7;
 	for (a = 0; a < g_textures_cnt; a++)
 	{

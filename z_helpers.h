@@ -1,7 +1,7 @@
 
 #pragma once
 
-
+#include <regex>
 #include <SDL3/SDL.h>
 #include "z_types.h"
 #include "config.h"
@@ -43,15 +43,11 @@ inline bool key_get(SDL_Scancode code)
 
 
 
-inline bool load_texture(cTexture& MyTexture, const wchar_t* szFileName, const wchar_t* szFileNameNormal)
+inline bool load_texture(cTexture& MyTexture, const std::string szFileName)
 {
-	char buff[255];
-
-	std::wstring file = ASSETS_PATH;
+	std::string file = ASSETS_PATH;
 	file += szFileName;
-
-	std::wcstombs(buff, file.c_str(), 255);
-	SDL_Surface* bm2 = SDL_LoadBMP(buff);
+	SDL_Surface* bm2 = SDL_LoadBMP(file.c_str());
 
 	if (bm2)
 	{
@@ -71,20 +67,17 @@ inline bool load_texture(cTexture& MyTexture, const wchar_t* szFileName, const w
 
 		MyTexture.hasAlpha = false;
 
-		if (szFileNameNormal) {
-			file = ASSETS_PATH;
-			file += szFileNameNormal;
-			std::wcstombs(buff, file.c_str(), 255);
-			SDL_Surface* bm2 = SDL_LoadBMP(buff);
-			if (bm2)
+
+		//  Try load surface normal texture.
+		file = std::regex_replace(file, std::regex("\\_COL_"), "_NRM_");
+		SDL_Surface* bm2 = SDL_LoadBMP(file.c_str());
+		if (bm2)
+		{
+			Colour<BYTE>* pm = (Colour<BYTE>*)bm->pixels;
+			MyTexture.pixels_normal = static_cast<Vec3*>(SDL_malloc(MyTexture.bmWidth * MyTexture.bmHeight * 3 * sizeof(float)));
+			for (z_size_t a = 0; a < MyTexture.bmWidth * MyTexture.bmHeight; a++)
 			{
-				Colour<BYTE>* pm = (Colour<BYTE>*)bm->pixels;
-				MyTexture.pixels_normal = static_cast<Vec3*>(SDL_malloc(MyTexture.bmWidth * MyTexture.bmHeight * 3 * sizeof(float)));
-				for (z_size_t a = 0; a < MyTexture.bmWidth * MyTexture.bmHeight; a++)
-				{
-					MyTexture.pixels_normal[a] = pm[a].toNormal();
-				}
-				//MyTexture.pixels_normal = ;
+				MyTexture.pixels_normal[a] = pm[a].toNormal();
 			}
 		}
 

@@ -8,12 +8,13 @@
 #include <vector>
 #include <atomic>
 #include <mutex>
-#include "json.hpp"
 
 #include "z_types.h"
 #include "z_helpers.h"
 #include "config.h"
 #include "engine.h"
+
+//#include "json.hpp"
 
 using json::JSON;
 
@@ -1273,42 +1274,30 @@ void hide_all_ugly_init_stuff(void)
 		}
 	}
 	
-	
-	
 
-	// Sphere test.
-	//a = create_sphere(-200, 0, 200, 100);
-	//g_objects[a].colour.r = 0.5f; g_objects[a].colour.g = 0.5f; g_objects[a].colour.b = 0.5f;
-	//g_objects[a].SurfaceTexture = 6; g_objects[a].SurfaceMultW = 4.0f; g_objects[a].SurfaceMultH = -4.0f;
-
-	
-	//g_box_idx = create_box(-25, 50, -25, 50, 40, 50, g_box_texture, 0.2, 0.2);
-
-
-	
-	// Try load the textures....
-	//L"hr_wall.bmp"
-	const wchar_t* texture_files[] = { L"tiles_0013_color_1k.bmp", L"stone/StoneBricksSplitface001_COL_2K.bmp", L"pexels-pixabay-268976.bmp", L"bttf.bmp", L"corkvending.ie.bmp",  L"gift.bmp" , L"panda3.bmp"};
-	const wchar_t* normal_files[]  = { 0,                          L"stone/StoneBricksSplitface001_NRM_2K.bmp", 0, 0, 0, 0, 0};
-	g_textures_cnt = 7;
-	for (a = 0; a < g_textures_cnt; a++)
+	g_textures_cnt = 0;
+	for (auto& j : world.at("textures").ArrayRange())
 	{
-		if (!load_texture(g_textures[a], texture_files[a], normal_files[a]))
+		if (!load_texture(g_textures[g_textures_cnt], j.ToString()))
 		{
-			if (a == g_box_texture) {
+			if (g_textures_cnt == g_box_texture) {
 				g_box_texture = -1;
 			}
 			else {
 
 				for (int b = 0; b < g_objects_cnt; b++)
 				{
-					if (g_objects[b].SurfaceTexture == a)
+					if (g_objects[b].SurfaceTexture == g_textures_cnt)
 					{
 						g_objects[b].SurfaceTexture = -1;
 					}
 				}
 			}
 		}
+		else {
+			g_textures_cnt++;
+		}
 	}
+	
 
 }

@@ -11,4 +11,4 @@ const int SCREEN_FPS_MAX = 60;
 const int SCREEN_TICKS_PER_FRAME = 1000 / SCREEN_FPS_MAX;
 
 #define Z_WINDOW_TITLE "zRay"
-#define ASSETS_PATH L"textures\\"
+#define ASSETS_PATH "textures\\"

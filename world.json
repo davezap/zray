@@ -1,4 +1,13 @@
 {
+	"textures": [
+		"tiles_0013_color_1k.bmp", 
+		"stone/StoneBricksSplitface001_COL_2K.bmp",
+		"pexels-pixabay-268976.bmp",
+		"bttf.bmp",
+		"corkvending.ie.bmp",
+		"gift.bmp",
+		"panda3.bmp"
+	],
 	"lights": [
 		{
 			"type": 1,

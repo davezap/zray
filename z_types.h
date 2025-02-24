@@ -1,10 +1,11 @@
 #pragma once
 
+
 #include <string>
 #include <SDL3/SDL.h>
 #include "z_math.h"
 
-//#include "json.hpp"
+#include "json.hpp"
 
 //using json::JSON;
 
@@ -575,7 +576,7 @@ struct polygon_type
 
 struct cTexture
 {
-	std::wstring filename;
+	std::string filename;
 	Colour<BYTE>* pixels_colour = NULL;
 	Vec3* pixels_normal = NULL;
 

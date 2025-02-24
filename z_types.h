@@ -7,7 +7,7 @@
 
 #include "json.hpp"
 
-//using json::JSON;
+using json::JSON;
 
 typedef unsigned int z_size_t;
 typedef unsigned int z_screen_t;	// used for x an y coordinates in to textures and the display
@@ -17,6 +17,20 @@ typedef unsigned char BYTE;
 struct uv_type
 {
 	float u = 0.0f, v = 0.0f;
+
+	void fromJSON(JSON& j)
+	{
+		if (j.at(0).JSONType() == JSON::Class::Integral)
+			u = static_cast<float>(j.at(0).ToInt());
+		else
+			u = static_cast<float>(j.at(0).ToFloat());
+
+		if (j.at(1).JSONType() == JSON::Class::Integral)
+			v = static_cast<float>(j.at(1).ToInt());
+		else
+			v = static_cast<float>(j.at(1).ToFloat());
+	}
+
 };
 
 
@@ -92,6 +106,8 @@ struct Vec3 {
 		return x * other.x + y * other.y + z * other.z;
 	}
 
+
+
 	// dot product, used to get cosine angle between two vectors.
 	inline float cos_angle(const Vec3& other)
 	{
@@ -120,6 +136,23 @@ struct Vec3 {
 		z = static_cast<float>(j.at(2).ToFloat());
 	}
 	*/
+	void fromJSON(JSON& j)
+	{
+		if (j.at(0).JSONType() == JSON::Class::Integral)
+			x = static_cast<float>(j.at(0).ToInt());
+		else
+			x = static_cast<float>(j.at(0).ToFloat());
+
+		if (j.at(1).JSONType() == JSON::Class::Integral)
+			y = static_cast<float>(j.at(1).ToInt());
+		else
+			y = static_cast<float>(j.at(1).ToFloat());
+
+		if (j.at(2).JSONType() == JSON::Class::Integral)
+			z = static_cast<float>(j.at(2).ToInt());
+		else
+			z = static_cast<float>(j.at(2).ToFloat());
+	}
 
 };
 
@@ -264,6 +297,41 @@ struct Colour {
 		//if (a > 255) a = 255;
 
 	}
+
+	void fromJSON(JSON& j)
+	{
+		if (j.at(0).JSONType() == JSON::Class::Integral)
+			r = static_cast<float>(j.at(0).ToInt());
+		else
+			r = static_cast<float>(j.at(0).ToFloat());
+
+		if (r == -1) {
+			if(typeid(T) == typeid(BYTE))
+			{
+				*this = { 255, 178, 178, 178 };
+			}
+			else {
+				*this = { 1, 0.7f , 0.7f , 0.7f };	// This is the default defuse colour.
+			}
+			
+			return;
+		}
+
+		if (j.at(1).JSONType() == JSON::Class::Integral)
+			g = static_cast<float>(j.at(1).ToInt());
+		else
+			g = static_cast<float>(j.at(1).ToFloat());
+
+		if (j.at(2).JSONType() == JSON::Class::Integral)
+			b = static_cast<float>(j.at(2).ToInt());
+		else
+			b = static_cast<float>(j.at(2).ToFloat());
+
+		if (j.at(3).JSONType() == JSON::Class::Integral)
+			a = static_cast<float>(j.at(3).ToInt());
+		else
+			a = static_cast<float>(j.at(3).ToFloat());
+	}
 };
 
 
@@ -396,25 +464,24 @@ struct Object
 	{
 		float D = r.dot(n);
 
-		if (D > 0) {
-			Vec3 sr = s-o;
-			Vec3 tcross = sr.cross_product(r);  // scalar triple product
-			float D2 = dB.dot(tcross);			
-			if ((D2 < 0) || (D2 > D)) return 0;
-			float D3 = -dA.dot(tcross);
+		if (D < 0) return 0;
+		Vec3 sr = s-o;
+		Vec3 tcross = sr.cross_product(r);  // scalar triple product
+		float D2 = dB.dot(tcross);			
+		if ((D2 < 0) || (D2 > D)) return 0;
+		float D3 = -dA.dot(tcross);
 
-			if (D3 >= 0 && D3 <= D) {
-				uv.u = D2 / D;
-				uv.v = D3 / D;
-				float L = sr.dot(n) / D;
-				out_intersect.x = o.x + r.x * L;
-				out_intersect.y = o.y + r.y * L;
-				out_intersect.z = o.z + r.z * L;
-				return L;
-			}
-
+		if (D3 >= 0 && D3 <= D) {
+			uv.u = D2 / D;
+			uv.v = D3 / D;
+			float L = sr.dot(n) / D;
+			out_intersect.x = o.x + r.x * L;
+			out_intersect.y = o.y + r.y * L;
+			out_intersect.z = o.z + r.z * L;
+			return L;
 		}
-		out_intersect = { 0,0,0 };
+
+		//out_intersect = { 0,0,0 };
 		return 0;
 	}
 	

@@ -147,7 +147,7 @@ bool init_world()
 
 	g_light_ambient = { 1.0, 20.0, 20.0, 20.0 };
 
-	hide_all_ugly_init_stuff();
+	load_world();
 
 	return true;
 }
@@ -177,8 +177,10 @@ void main_loop(Colour<BYTE>* src_pixels)
 	z_size_t a = 0;
 	if (g_panda_ball_idx != -1)
 	{
+		g_objects[g_panda_ball_idx].radius_squared = 8000;
+		g_objects[g_panda_ball_idx].s.y = 0;
 		if (g_objects[g_panda_ball_idx].radius_squared <= 8000)
-		{
+		{			
 			g_objects[g_panda_ball_idx].radius_squared *= 1 + (8050 - g_objects[g_panda_ball_idx].radius_squared) / 40000;
 			g_objects[g_panda_ball_idx].s.y = 100 - std::sqrtf(g_objects[g_panda_ball_idx].radius_squared);
 		}
@@ -213,7 +215,7 @@ void main_loop(Colour<BYTE>* src_pixels)
 	}
 	g_objects_cnt = oldcnt;
 
-	rotate_world();
+	transform_camera();
 
 	// Check the number of requested threads is running and start them if not.
 	if (g_threads_requested != g_threads_allocated)
@@ -879,7 +881,7 @@ void render_text_overlay(SDL_Renderer* renderer)
 //	perform basic culling.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-inline void rotate_world()
+inline void transform_camera()
 {
 
 	// Reset camera before translation.
@@ -904,6 +906,12 @@ inline void rotate_world()
 
 	g_camera.screen.n = g_camera.screen.dA.cross_product(g_camera.screen.dB);
 	g_camera.screen.nu = g_camera.screen.n.unitary();
+
+
+	// Now the camera is setup, we can consider optimizing the objects and 
+	// lights to be included in the trace() operations.
+
+	// TODO: Currently everything is included. 
 
 	long b=0,c=0;
 
@@ -932,32 +940,85 @@ inline void rotate_world()
 }
 
 
-
-inline bool object_in_frustum(Object& Mesh)
+void process_inputs(void)
 {
-	float sAz = Mesh.s.z + Mesh.dA.z;
-	float sAy = Mesh.s.y + Mesh.dA.y;
-	float sAx = Mesh.s.x + Mesh.dA.x;
-	float sBz = Mesh.s.z + Mesh.dB.z;
-	float sBy = Mesh.s.y + Mesh.dB.y;
-	float sBx = Mesh.s.x + Mesh.dB.x;
+	g_movement_multiplier = 2.0f;
+	if (key_get(SDL_SCANCODE_LSHIFT)) g_movement_multiplier = 5.0f;
+	else if (key_get(SDL_SCANCODE_LCTRL)) g_movement_multiplier = 0.5f;
 
-
-	if ((Mesh.s.z > g_eye) || (sAz > g_eye) || (sBz > g_eye) || (sAz + sBz > g_eye))
+	if (key_get(SDL_SCANCODE_LEFT))
 	{
-		return true;
+		g_camera_angle.y -= 4.0f * g_movement_multiplier;
 	}
-	return false;
-}
-
-inline bool light_in_frustum(Light& light)
-{
-
-	if (light.s.z > -1100)
+	if (key_get(SDL_SCANCODE_RIGHT))
 	{
-		return true;
+		g_camera_angle.y += 4.0f * g_movement_multiplier;
 	}
-	return false;
+	if (key_get(SDL_SCANCODE_UP))
+	{
+		g_camera_position.x -= MySin(-g_camera_angle.y) * 15.0f * g_movement_multiplier;
+		g_camera_position.z += MyCos(-g_camera_angle.y) * 15.0f * g_movement_multiplier;
+	}
+
+	if (key_get(SDL_SCANCODE_DOWN))
+	{
+		g_camera_position.x += MySin(-g_camera_angle.y) * 15.0f * g_movement_multiplier;
+		g_camera_position.z -= MyCos(-g_camera_angle.y) * 15.0f * g_movement_multiplier;
+	}
+
+	if (key_get(SDL_SCANCODE_Y))
+	{
+		g_camera_angle.x -= 8.0f * g_movement_multiplier;
+	}
+	if (key_get(SDL_SCANCODE_H))
+	{
+		g_camera_angle.x += 8.0f * g_movement_multiplier;
+	}
+
+
+	if (g_camera_angle.x > 359) g_camera_angle.x = g_camera_angle.x - 360;
+	if (g_camera_angle.y > 359) g_camera_angle.y = g_camera_angle.y - 360;
+	if (g_camera_angle.z > 359) g_camera_angle.z = g_camera_angle.z - 360;
+	if (g_camera_angle.x < 0) g_camera_angle.x = 360 + g_camera_angle.x;
+	if (g_camera_angle.y < 0) g_camera_angle.y = 360 + g_camera_angle.y;
+	if (g_camera_angle.z < 0) g_camera_angle.z = 360 + g_camera_angle.z;
+
+
+	if (key_get_clear(SDL_SCANCODE_A)) g_option_antialias = !g_option_antialias;
+	if (key_get_clear(SDL_SCANCODE_S)) g_option_shadows = !g_option_shadows;
+	if (key_get_clear(SDL_SCANCODE_L)) g_option_lighting = !g_option_lighting;
+	if (key_get_clear(SDL_SCANCODE_T)) g_option_textures = !g_option_textures;
+	if (key_get_clear(SDL_SCANCODE_Z) && g_screen_divisor > 1) g_screen_divisor--;
+	if (key_get_clear(SDL_SCANCODE_X) && g_screen_divisor < 11) g_screen_divisor++;
+	if (key_get_clear(SDL_SCANCODE_N) && g_threads_requested > 1) g_threads_requested -= 1;
+	if (key_get_clear(SDL_SCANCODE_M) && g_threads_requested < MAX_THREADS) g_threads_requested += 1;
+	if (key_get_clear(SDL_SCANCODE_1)) g_lights[0].Enabled = !g_lights[0].Enabled;
+	if (key_get_clear(SDL_SCANCODE_2)) g_lights[1].Enabled = !g_lights[1].Enabled;
+	if (key_get_clear(SDL_SCANCODE_3)) g_lights[2].Enabled = !g_lights[2].Enabled;
+	if (key_get_clear(SDL_SCANCODE_4)) g_lights[3].Enabled = !g_lights[3].Enabled;
+	if (key_get_clear(SDL_SCANCODE_5)) g_lights[4].Enabled = !g_lights[4].Enabled;
+	if (key_get_clear(SDL_SCANCODE_6)) g_lights[5].Enabled = !g_lights[5].Enabled;
+	if (key_get_clear(SDL_SCANCODE_7)) g_lights[6].Enabled = !g_lights[6].Enabled;
+	if (key_get_clear(SDL_SCANCODE_8)) g_lights[7].Enabled = !g_lights[7].Enabled;
+	if (key_get_clear(SDL_SCANCODE_9)) g_lights[8].Enabled = !g_lights[8].Enabled;
+	if (key_get_clear(SDL_SCANCODE_0)) g_lights[9].Enabled = !g_lights[9].Enabled;
+
+	if (key_get(SDL_SCANCODE_Q)) lv.x -= 1;
+	if (key_get(SDL_SCANCODE_W)) lv.x += 1;
+
+
+
+	if (key_get_clear(SDL_SCANCODE_R)) g_render_timer_lowest = 10000;
+
+	if (key_get(SDL_SCANCODE_O))
+	{
+		g_eye += 10;
+	}
+	if (key_get(SDL_SCANCODE_P))
+	{
+		g_eye -= 10;
+	}
+
 }
 
 
@@ -1031,156 +1092,7 @@ inline z_size_t create_box(Vec3 s, Vec3 e, Colour<float> c, z_size_t tx, uv_type
 
 
 
-
-
-
-
-void process_inputs(void)
-{
-	g_movement_multiplier = 2.0f;
-	if (key_get(SDL_SCANCODE_LSHIFT)) g_movement_multiplier = 5.0f;
-	else if (key_get(SDL_SCANCODE_LCTRL)) g_movement_multiplier = 0.5f;
-
-	if (key_get(SDL_SCANCODE_LEFT))
-	{
-		g_camera_angle.y -= 4.0f * g_movement_multiplier;
-	}
-	if (key_get(SDL_SCANCODE_RIGHT))
-	{
-		g_camera_angle.y += 4.0f * g_movement_multiplier;
-	}
-	if (key_get(SDL_SCANCODE_UP))
-	{
-		g_camera_position.x -= MySin(-g_camera_angle.y) * 15.0f * g_movement_multiplier;
-		g_camera_position.z += MyCos(-g_camera_angle.y) * 15.0f * g_movement_multiplier;
-	}
-
-	if (key_get(SDL_SCANCODE_DOWN))
-	{
-		g_camera_position.x += MySin(-g_camera_angle.y) * 15.0f * g_movement_multiplier;
-		g_camera_position.z -= MyCos(-g_camera_angle.y) * 15.0f * g_movement_multiplier;
-	}
-
-	if (key_get(SDL_SCANCODE_Y))
-	{
-		g_camera_angle.x -= 8.0f * g_movement_multiplier;
-	}
-	if (key_get(SDL_SCANCODE_H))
-	{
-		g_camera_angle.x += 8.0f * g_movement_multiplier;
-	}
-
-
-	if (g_camera_angle.x > 359) g_camera_angle.x = g_camera_angle.x - 360;
-	if (g_camera_angle.y > 359) g_camera_angle.y = g_camera_angle.y - 360;
-	if (g_camera_angle.z > 359) g_camera_angle.z = g_camera_angle.z - 360;
-	if (g_camera_angle.x < 0) g_camera_angle.x = 360 + g_camera_angle.x;
-	if (g_camera_angle.y < 0) g_camera_angle.y = 360 + g_camera_angle.y;
-	if (g_camera_angle.z < 0) g_camera_angle.z = 360 + g_camera_angle.z;
-
-
-	if (key_get_clear(SDL_SCANCODE_A)) g_option_antialias = !g_option_antialias;
-	if (key_get_clear(SDL_SCANCODE_S)) g_option_shadows = !g_option_shadows;
-	if (key_get_clear(SDL_SCANCODE_L)) g_option_lighting = !g_option_lighting;
-	if (key_get_clear(SDL_SCANCODE_T)) g_option_textures = !g_option_textures;
-	if (key_get_clear(SDL_SCANCODE_Z) && g_screen_divisor > 1) g_screen_divisor--;
-	if (key_get_clear(SDL_SCANCODE_X) && g_screen_divisor < 11) g_screen_divisor++;
-	if (key_get_clear(SDL_SCANCODE_N) && g_threads_requested > 1) g_threads_requested -= 1;
-	if (key_get_clear(SDL_SCANCODE_M) && g_threads_requested < MAX_THREADS) g_threads_requested += 1;
-	if (key_get_clear(SDL_SCANCODE_1)) g_lights[0].Enabled = !g_lights[0].Enabled;
-	if (key_get_clear(SDL_SCANCODE_2)) g_lights[1].Enabled = !g_lights[1].Enabled;
-	if (key_get_clear(SDL_SCANCODE_3)) g_lights[2].Enabled = !g_lights[2].Enabled;
-	if (key_get_clear(SDL_SCANCODE_4)) g_lights[3].Enabled = !g_lights[3].Enabled;
-	if (key_get_clear(SDL_SCANCODE_5)) g_lights[4].Enabled = !g_lights[4].Enabled;
-	if (key_get_clear(SDL_SCANCODE_6)) g_lights[5].Enabled = !g_lights[5].Enabled;
-	if (key_get_clear(SDL_SCANCODE_7)) g_lights[6].Enabled = !g_lights[6].Enabled;
-	if (key_get_clear(SDL_SCANCODE_8)) g_lights[7].Enabled = !g_lights[7].Enabled;
-	if (key_get_clear(SDL_SCANCODE_9)) g_lights[8].Enabled = !g_lights[8].Enabled;
-	if (key_get_clear(SDL_SCANCODE_0)) g_lights[9].Enabled = !g_lights[9].Enabled;
-
-	if (key_get(SDL_SCANCODE_Q)) lv.x -= 1;
-	if (key_get(SDL_SCANCODE_W)) lv.x += 1;
-
-	
-
-	if (key_get_clear(SDL_SCANCODE_R)) g_render_timer_lowest = 10000;
-
-	if (key_get(SDL_SCANCODE_O))
-	{
-		g_eye += 10;
-	}
-	if (key_get(SDL_SCANCODE_P))
-	{
-		g_eye -= 10;
-	}
-
-}
-
-
-
-void fromJSON(Vec3& v, JSON& j)
-{
-	if(j.at(0).JSONType() == JSON::Class::Integral)
-		v.x = static_cast<float>(j.at(0).ToInt());
-	else
-		v.x = static_cast<float>(j.at(0).ToFloat());
-
-	if (j.at(1).JSONType() == JSON::Class::Integral)
-		v.y = static_cast<float>(j.at(1).ToInt());
-	else
-		v.y = static_cast<float>(j.at(1).ToFloat());
-
-	if (j.at(2).JSONType() == JSON::Class::Integral)
-		v.z = static_cast<float>(j.at(2).ToInt());
-	else
-		v.z = static_cast<float>(j.at(2).ToFloat());
-}
-
-void fromJSONColour(Colour<float>& c, JSON& j)
-{
-	if (j.at(0).JSONType() == JSON::Class::Integral)
-		c.r = static_cast<float>(j.at(0).ToInt());
-	else
-		c.r = static_cast<float>(j.at(0).ToFloat());
-
-	if (c.r == -1) {
-		c = { 1, 0.7f , 0.7f , 0.7f};
-		return;
-	}
-
-	if (j.at(1).JSONType() == JSON::Class::Integral)
-		c.g = static_cast<float>(j.at(1).ToInt());
-	else
-		c.g = static_cast<float>(j.at(1).ToFloat());
-	
-	if (j.at(2).JSONType() == JSON::Class::Integral)
-		c.b = static_cast<float>(j.at(2).ToInt());
-	else
-		c.b = static_cast<float>(j.at(2).ToFloat());
-
-	if (j.at(3).JSONType() == JSON::Class::Integral)
-		c.a = static_cast<float>(j.at(3).ToInt());
-	else
-		c.a = static_cast<float>(j.at(3).ToFloat());
-}
-
-void fromJSONUV(uv_type& v, JSON& j)
-{
-	if (j.at(0).JSONType() == JSON::Class::Integral)
-		v.u = static_cast<float>(j.at(0).ToInt());
-	else
-		v.u = static_cast<float>(j.at(0).ToFloat());
-
-	if (j.at(1).JSONType() == JSON::Class::Integral)
-		v.v = static_cast<float>(j.at(1).ToInt());
-	else
-		v.v = static_cast<float>(j.at(1).ToFloat());
-
-
-}
-
-
-void hide_all_ugly_init_stuff(void)
+void load_world(void)
 {
 	z_size_t a = 0;
 	g_lights_cnt = 0;
@@ -1189,18 +1101,20 @@ void hide_all_ugly_init_stuff(void)
 	std::ifstream t("world.json");
 	std::string str((std::istreambuf_iterator<char>(t)),
 		std::istreambuf_iterator<char>());
-
 	JSON world = JSON::Load(str);
-	//JSON lights = world.
+
+
+	// LIGHTS
+
 	std::cout << world.dump();
 	for (auto& j : world.at("lights").ArrayRange())
 	{
 		g_lights[g_lights_cnt].Type = j["type"].ToInt();
 		g_lights[g_lights_cnt].Enabled = j["enabled"].ToBool();
-		fromJSON(g_lights[g_lights_cnt].s, j["s"]);
-		fromJSONColour(g_lights[g_lights_cnt].colour, j["colour"]);
+		g_lights[g_lights_cnt].s.fromJSON(j["s"]);
+		g_lights[g_lights_cnt].colour.fromJSON(j["colour"]);
 		if (g_lights[g_lights_cnt].Type == 2) {
-			fromJSON(g_lights[g_lights_cnt].direction, j["n"]);
+			g_lights[g_lights_cnt].direction.fromJSON(j["n"]);
 			g_lights[g_lights_cnt].Cone = static_cast<float>(j["cone"].ToFloat());
 			g_lights[g_lights_cnt].FuzFactor = static_cast<float>(j["falloff"].ToFloat());
 		}
@@ -1208,7 +1122,7 @@ void hide_all_ugly_init_stuff(void)
 		g_lights_cnt++;
 	}
 
-	//g_lights_cnt = a+1 ;
+	// It's handy to disable all but one light when debugging.
 	/*
 	for (a = 0; a < g_lights_cnt; a++)
 	{
@@ -1217,8 +1131,8 @@ void hide_all_ugly_init_stuff(void)
 	*/
 	// Done.
 
-		//walls
-	float sa = 0.7f;
+	// Objects
+
 	g_objects_cnt = 0;
 
 	for (auto& j : world.at("objects").ArrayRange())
@@ -1229,11 +1143,11 @@ void hide_all_ugly_init_stuff(void)
 			Colour<float> c;
 			z_size_t tx = j["texture"].ToInt();
 			uv_type tx_uv;
-			fromJSONUV(tx_uv, j["uvm"]);
-			fromJSON(s, j["s"]);
-			fromJSON(da, j["da"]);
-			fromJSON(db, j["db"]);
-			fromJSONColour(c, j["colour"]);
+			tx_uv.fromJSON(j["uvm"]);
+			s.fromJSON(j["s"]);
+			da.fromJSON(j["da"]);
+			db.fromJSON(j["db"]);
+			c.fromJSON(j["colour"]);
 			
 			create_plane(s, da, db, c, tx, tx_uv);
 		}
@@ -1243,9 +1157,9 @@ void hide_all_ugly_init_stuff(void)
 			float radius = j["r"].ToFloat();
 			z_size_t tx = j["texture"].ToInt();
 			uv_type tx_uv;
-			fromJSONUV(tx_uv, j["uvm"]);
-			fromJSON(s, j["s"]);
-			fromJSONColour(c, j["colour"]);
+			tx_uv.fromJSON(j["uvm"]);
+			s.fromJSON(j["s"]);
+			c.fromJSON(j["colour"]);
 			int a = create_sphere(s, radius, c, tx, tx_uv);
 			if (j["desc"].ToString() == "panda ball") {
 				g_panda_ball_idx = a;
@@ -1256,10 +1170,10 @@ void hide_all_ugly_init_stuff(void)
 			Colour<float> c;
 			z_size_t tx = j["texture"].ToInt();
 			uv_type tx_uv;
-			fromJSONUV(tx_uv, j["uvm"]);
-			fromJSON(s, j["s"]);
-			fromJSON(e, j["e"]);
-			fromJSONColour(c, j["colour"]);
+			tx_uv.fromJSON(j["uvm"]);
+			s.fromJSON(j["s"]);
+			e.fromJSON(j["e"]);
+			c.fromJSON(j["colour"]);
 			int a = create_box(s, e, c, tx, tx_uv);
 
 			if (j["desc"].ToString() == "vending") {
@@ -1274,6 +1188,7 @@ void hide_all_ugly_init_stuff(void)
 		}
 	}
 	
+	// Textures
 
 	g_textures_cnt = 0;
 	for (auto& j : world.at("textures").ArrayRange())

@@ -546,12 +546,14 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 				ii = ii + pXNormal * 1000;
 			}
 			*/
+
+			/*
 			Vec3 pXNormal = { 0,0,0 };
 			if (MyFace->SurfaceTexture != -1 && g_textures[MyFace->SurfaceTexture].pixels_normal)
 			{
 				pXNormal = g_textures[MyFace->SurfaceTexture].get_normal(long((gtl_surface_uv_min.u * MyFace->SurfaceMultW) * g_textures[MyFace->SurfaceTexture].bmWidth), long((gtl_surface_uv_min.v * MyFace->SurfaceMultH) * g_textures[MyFace->SurfaceTexture].bmHeight)); Colour<BYTE> pXColor = g_textures[MyFace->SurfaceTexture].get_pixel(long((gtl_surface_uv_min.u * MyFace->SurfaceMultW) * g_textures[MyFace->SurfaceTexture].bmWidth), long((gtl_surface_uv_min.v * MyFace->SurfaceMultH) * g_textures[MyFace->SurfaceTexture].bmHeight));
 			}
-
+			*/
 			for (z_size_t LSX = 0; LSX < g_lights_active_cnt; LSX++)
 			{
 				float F = 1; // F represents intensity from 0 to 1.  (start with one for point lights)
@@ -701,7 +703,7 @@ inline bool trace_light(Vec3& o, Vec3& r, Object* OBJ)
 	float t;
 	Vec3 dir = r.unitary();
 	//float a = 1; // dir.dot(dir); // Assuming 'dir' is normalized, a = 1.
-
+	float r_len = r.length();
 
 	while (cnt--)
 	{
@@ -739,11 +741,12 @@ inline bool trace_light(Vec3& o, Vec3& r, Object* OBJ)
 				if (t0 < 0) {
 					if (t1 < 0) // Both intersections are behind the ray.
 					{
-						//MyObb++; 
 						continue;
 					}
 					t0 = t1;
 				}
+
+				if (t0 > r_len) continue;
 
 				return true;
 

@@ -20,6 +20,7 @@ using json::JSON;
 
 #define SCREEN_LEN SCREEN_WIDTH * SCREEN_HEIGHT
 
+
 // Core rendering variables. //////
 
 Uint64 g_render_timer;			// Tracks the number of ms to render one frame
@@ -40,12 +41,12 @@ thread_local float gtl_matrix[4][4];
 // never write to the same address.
 Colour<BYTE>* g_pixels = NULL;
 
-
 int gro_screen_divisor; // ... All other pixels are made the same colour.
 
 
 
-// Multithreading support. ///////
+
+// Multithreaded rendering.	///////
 
 #define MAX_THREADS 128			// I mean, how many is too many?
 #ifdef _DEBUG
@@ -80,8 +81,8 @@ z_size_t g_objects_cnt;			// ...and number off
 std::vector<Object*> g_objects_shadowers; // Ob[]'s here after transforms, rotate, and frustum check.
 z_size_t g_objects_shadowers_cnt;
 
-std::vector<Object*> g_objects_in_view;		// back-face culled subset of g_objects_shadowers, 
-z_size_t g_objects_in_view_cnt;	// this is what the camera can see.
+std::vector<Object*> g_objects_in_view;	// back-face culled subset of g_objects_shadowers, 
+z_size_t g_objects_in_view_cnt;			// this is what the camera can see.
 
 Light g_lights[100];
 Light g_lights_active[100];
@@ -91,7 +92,6 @@ z_size_t g_lights_active_cnt;
 z_size_t g_textures_cnt = 0;
 cTexture g_textures[10];
 
-
 Vec3 g_camera_angle = { 0, 0, 0 };				// View Point Angle
 Vec3 g_camera_position;				// View Point Pos
 Camera g_camera;
@@ -99,7 +99,7 @@ thread_local Camera gtl_camera;
 
 
 
-// Keyboard options.. ////////////
+// user options.. ////////////
 float g_movement_multiplier = 1;// multiplier for holding left-Shift or left-Crtl for movement.
 bool g_option_shadows;
 bool g_option_lighting;
@@ -126,7 +126,6 @@ void dbg(const wchar_t* szFormat, ...)
 	_vsnwprintf_s(szBuff, sizeof(szBuff), szFormat, arg);
 	va_end(arg);
 	std::wcout << szBuff;
-	//OutputDebugString(szBuff);
 }
 
 
@@ -188,13 +187,10 @@ void main_loop(Colour<BYTE>* src_pixels)
 	box_angle.z += 0.1f;
 	box_angle.y += 1.0f;
 	box_angle.roll360();
-	///if (box_angle.x > 359) box_angle.x = box_angle.x - 360;
-	///if (box_angle.y > 359) box_angle.y = box_angle.y - 360;
+
 	Matrix44 mtrx;
 	mtrx.ident();
 	mtrx.rotate(box_angle);
-	//Vec3 p = { -25, -25, -25 };
-	//mtrx.translate(p);
 
 	rebuild_box(g_box_idx, { -25, -25, -25 }, { 50, 50, 50 });
 	for (a = g_box_idx; a < g_box_idx + 6; a++)
@@ -206,8 +202,6 @@ void main_loop(Colour<BYTE>* src_pixels)
 		mtrx.transform(g_objects[a].dBu);
 		mtrx.transform(g_objects[a].n);
 		mtrx.transform(g_objects[a].nu);
-		//Ob[a].n = -Ob[a].dA.normal(Ob[a].dB);
-		//CalcNorm(Ob[a]);
 	}
 
 
@@ -311,7 +305,6 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 		std::unique_lock<std::mutex> lock(gmtx_change_shared);
 		gatm_threads_waiting.fetch_add(1); // Increment the number of threads waiting
 		gcv_threads_wait.notify_all();
-		//Output(L"started\n");	
 	}
 
 	//threads_waiting.fetch_add(1);
@@ -322,21 +315,17 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 			std::unique_lock<std::mutex> lock(gmtx_change_shared);
 			gatm_threads_ready_cnt.fetch_add(1);
 			gcv_thread_ready.notify_all();
-			//Output(L"[%d] notify threadsReady = %d\n", thread_num, threadsReady.load());
 		}
 
 		{
-			//Output(L"[%d] wait rendering\n", thread_num);
 			std::unique_lock<std::mutex> lock(gmtx_change_shared);
 			gcv_threads_render_now.wait(lock, [] { return gro_threads_render_now; });
 		}
 
 		if (gatm_threads_exit_now.load()) {
-			//if (AltThread) Output(L"exit\n");
 			return;
 		}
 
-		//Output(L"[%d] rendering...\n", thread_num);
 
 		float SupSampSize = float(gro_screen_divisor) / 5218.9524;
 		Colour<float> pixel = { 0.0f, 0.0f, 0.0f, 0.0f };		// Temp Color
@@ -346,16 +335,6 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 
 		int Xro = (SCREEN_WIDTH / 2);
 		int Yro = (SCREEN_HEIGHT / 2);
-		//tsDefRenderStp = 1;
-
-
-		// ok so gtl_camera.screen.s is the center of our view port.
-		// from gtl_camera.screen.s.x
-		// gtl_camera.screen.dA * (Xmax - Xmin)
-		// gtl_camera.screen.dB * (Ymax - Ymin)
-		 
-		//-Xro, -Yro // # top left
-
 
 		for (float Yr = static_cast <float>(Ymin); Yr < Ymax; Yr += gro_screen_divisor)	// tsDefRenderStp
 		{
@@ -368,10 +347,12 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 				pixelPos = pixelPos.unitary();
 				// Reset our Point colour..
 				pixel = { 0,0,0,0 };
+				/*
 				if (Xr == Xmin && Yr == Ymin)
 				{
 					pixel = { 0,0,0,0 };
 				}
+				*/
 
 				trace(gtl_camera.fp, pixelPos, pixel);
 				if (g_option_antialias)
@@ -390,16 +371,11 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 					pixelPos.offset({ 0, -2 * SupSampSize, 0 });
 					trace(gtl_camera.fp, pixelPos, pixel);
 					pixel /= 5;
-					//ccR = ccR / 5; ccG = ccG / 5; ccB = ccB / 5;
 				}
 
 				pixel.limit_rgba();
 
-				//g_ddsw->DrawRGBPixel(RGB(ccR, ccG, ccB));
-				//g_ddsw->DrawRawPixel(g_ddsw->RGBToRaw(RGB(ccR, ccG, ccB)));
 
-				//if((Xr + Xro) < SCREEN_WIDTH && (Yr + Yro) < SCREEN_HEIGHT)
-				//{
 				int sd = gro_screen_divisor;
 
 				if (gro_screen_divisor > 1)
@@ -418,20 +394,15 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 					g_pixels[int((Yr + Yro) * SCREEN_WIDTH + (Xr + Xro))].fromFloatC(pixel);
 				}
 
-				//////////////////////////////////////////////////////
-				//////////////////////////////////////////////////////
 			}
 
 		}
-
-		//if(thread_num ==0) std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
 		{
 			std::unique_lock<std::mutex> lock(gmtx_change_shared);
 			gatm_threads_ready_cnt.fetch_sub(1);
 			gcv_thread_ready.notify_all();
 		}
-		//Output(L"[%d] notified done threadsReady = %d\n", thread_num, threadsReady.load());
 
 		{
 			std::unique_lock<std::mutex> lock(gmtx_change_shared);
@@ -534,25 +505,7 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 			//	- test if we can trace a direct path from light to surface.
 			//  - if so then calculate the intensity and colour of falling on our surface
 			//  - otherwise if the light cannot see surface it is casting a shadow (the absence of light)
-			/*
-			Vec3 pXNormal = { 0,0,0 };
-			if (MyFace->SurfaceTexture > -1) {
-				pXNormal = g_textures[MyFace->SurfaceTexture].get_normal(long((gtl_surface_uv_min.u * MyFace->SurfaceMultW) * g_textures[MyFace->SurfaceTexture].bmWidth), long((gtl_surface_uv_min.v * MyFace->SurfaceMultH) * g_textures[MyFace->SurfaceTexture].bmHeight));
-				if (MyFace->SurfaceTexture == 1)
-				{
-					pXNormal = pXNormal * 1;
-				}
-				ii = ii + pXNormal * 1000;
-			}
-			*/
-
-			/*
-			Vec3 pXNormal = { 0,0,0 };
-			if (MyFace->SurfaceTexture != -1 && g_textures[MyFace->SurfaceTexture].pixels_normal)
-			{
-				pXNormal = g_textures[MyFace->SurfaceTexture].get_normal(long((gtl_surface_uv_min.u * MyFace->SurfaceMultW) * g_textures[MyFace->SurfaceTexture].bmWidth), long((gtl_surface_uv_min.v * MyFace->SurfaceMultH) * g_textures[MyFace->SurfaceTexture].bmHeight)); Colour<BYTE> pXColor = g_textures[MyFace->SurfaceTexture].get_pixel(long((gtl_surface_uv_min.u * MyFace->SurfaceMultW) * g_textures[MyFace->SurfaceTexture].bmWidth), long((gtl_surface_uv_min.v * MyFace->SurfaceMultH) * g_textures[MyFace->SurfaceTexture].bmHeight));
-			}
-			*/
+			
 			for (z_size_t LSX = 0; LSX < g_lights_active_cnt; LSX++)
 			{
 				float F = 1; // F represents intensity from 0 to 1.  (start with one for point lights)
@@ -578,26 +531,19 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 						// If poly point is in Fuz edge of light then
 						if (F <= 1 - (MyLS->FuzFactor * MyLS->Cone))
 						{
-							// Drop light intensity off to 0 at edge of Cone.
+							// Drop light intensity to 0 at edge of Cone.
 							F = (F - (1 - MyLS->Cone)) / ((1 - (MyLS->FuzFactor * MyLS->Cone)) - (1 - MyLS->Cone));
 						}
 						else {
-							// If it's inside then full beam.
-							F = 1;
+							F = 1; // If it's inside then full beam.
 						}
 					}
 					else {
-						// Out side cone area so light gives no light.
-						F = 0;
+						F = 0; // Out side cone area so light gives no light.
 					}
-				}
+				} // else if (MyLS->Type==1) :  Point light radiates light in all directions so we don't need to consider this.
 
-				// Point light (MyLS->Type==1) : radiates light in all directions so we don't need to consider cones or direction.
-
-				// Get Cosine of light ray to surface normal (Lambert's cosine law)
-				// F will = 1 if the angle is 0 and F will = 0 if it is 90deg.
-
-
+				// Get Cosine of light ray to surface normal. This is Lambert's cosine law. 
 				if (MyFace->pType == 2)
 				{
 					// For a sphere the surface normal (n) is the vector from the center to 
@@ -607,30 +553,21 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 
 				} else {
 
-					// For planes the normal is precomputed.
-					//F *= CosAngle(ii - MyFace->n, s_minus_ii);
-					//F *= (ii - MyFace->n).cos_angle(s_minus_ii);
 					F *= (MyFace->nu).cos_angle(s_minus_ii);
-
+					/*
 					if (MyFace->SurfaceTexture != -1 && g_textures[MyFace->SurfaceTexture].pixels_normal)
 					{
 						//F *= (pXNormal).cos_angle(s_minus_ii);
 					}
+					*/
 				}
-
-				
-
 
 				// Calculate Shadows now, assuming the light actually has a potential effect on the surface.
 				if (F > 0 && F <= 1)
 				{
 
-					// Now test if any other object is between the light source and the surface the ray hits.
-					// This is computationally quite expensive but there are some optimizations to be had.
-					//	- break from the loop on the first object we find (that we do here)
-					if (MyFace->idx == 24) {
-						MyFace->idx = 24;
-					}
+					// Test if any other object is between the light source and the surface the ray hits.
+					// This is computationally quite expensive. It's actually more efficient to to this last.
 					if (g_option_shadows == true && trace_light(MyLS->s, s_minus_ii, MyFace)) goto cont;
 
 					// Add colour components to our pix value
@@ -783,27 +720,7 @@ inline bool trace_light(Vec3& o, Vec3& r, Object* OBJ)
 
 void threads_clear() {
 
-	// Tell threads it's time t go.
-	//gatm_threads_exit_now.store(true);
-	/*
-	// Release them from pending wait states.
-	{
-		std::unique_lock<std::mutex> lock(gmtx_change_shared);
-		gro_threads_render_now = false;
-		gcv_threads_render_now.notify_all();
-	}
-	{
-		// Wait for all threads to be ready
-		std::unique_lock<std::mutex> lock(gmtx_change_shared);
-		gcv_thread_ready.wait(lock, [] { return gatm_threads_ready_cnt.load() == g_threads_allocated; });
-	}
-	{
-		std::unique_lock<std::mutex> lock(gmtx_change_shared);
-		gro_threads_render_now = true;
-		gcv_threads_render_now.notify_all();
-	}
-	*/
-
+	// Tell threads it's time to go.
 	// this wil be true for rendering threads.
 	{	// wait for all threads to indicate they have initialised.
 		std::unique_lock<std::mutex> lock(gmtx_change_shared);
@@ -864,19 +781,7 @@ void render_text_overlay(SDL_Renderer* renderer)
 
 }
 
-
-
-
-
-
-
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// Rotate the world poly set and lights about CamX,CamY,CamZ
-//	return new world as Obt & LSt
-//	perform basic culling.
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
+bool copy_obj = false;
 inline void transform_camera()
 {
 	// Reset camera before translation.
@@ -905,33 +810,38 @@ inline void transform_camera()
 
 	long b=0,c=0;
 
-	g_objects_shadowers.clear();
-	g_objects_shadowers.reserve(g_objects_cnt);
-	g_objects_in_view.clear();
-	g_objects_in_view.reserve(g_objects_cnt);
+	if (!copy_obj) {
+		copy_obj = true;
+
+		g_objects_shadowers.clear();
+		//g_objects_shadowers.reserve(g_objects_cnt);
+		g_objects_in_view.clear();
+		//g_objects_in_view.reserve(g_objects_cnt);
 
 
-	for (z_size_t a = 0; a < g_objects_cnt; a++)
-	{
-		g_objects_shadowers[b] = &g_objects[a];
-		g_objects_in_view[c] = g_objects_shadowers[b];
-		c++;
-		b++;
-	}
-	g_objects_shadowers_cnt = b;
-	g_objects_in_view_cnt = c;
-
-	b = 0;
-	for (z_size_t a = 0; a < g_lights_cnt; a++)
-	{
-		if (g_lights[a].Enabled)
+		for (z_size_t a = 0; a < g_objects_cnt; a++)
 		{
-			g_lights_active[b] = g_lights[a];
+			g_objects_shadowers.push_back(&g_objects[a]);
+			g_objects_in_view.push_back(&g_objects[b]);
+			c++;
 			b++;
 		}
-	}
-	g_lights_active_cnt = b;
+		g_objects_shadowers_cnt = b;
+		g_objects_in_view_cnt = c;
 
+		b = 0;
+		for (z_size_t a = 0; a < g_lights_cnt; a++)
+		{
+			if (g_lights[a].Enabled)
+			{
+				g_lights_active[b] = g_lights[a];
+				b++;
+			}
+		}
+		g_lights_active_cnt = b;
+
+	
+	}
 	return;
 }
 

@@ -14,7 +14,6 @@
 #include "config.h"
 #include "engine.h"
 
-//#include "json.hpp"
 
 using json::JSON;
 
@@ -75,13 +74,13 @@ bool gro_threads_render_now = false;
 
 // Scene definitions. ////////////////
 
-Object g_objects[100];				// All objects
+std::vector<Object> g_objects;	// All objects
 z_size_t g_objects_cnt;			// ...and number off
 
-Object g_objects_shadowers[100];	// Ob[]'s here after transforms, rotate, and frustum check.
+std::vector<Object*> g_objects_shadowers; // Ob[]'s here after transforms, rotate, and frustum check.
 z_size_t g_objects_shadowers_cnt;
 
-Object* g_objects_in_view[100];		// back-face culled subset of g_objects_shadowers, 
+std::vector<Object*> g_objects_in_view;		// back-face culled subset of g_objects_shadowers, 
 z_size_t g_objects_in_view_cnt;	// this is what the camera can see.
 
 Light g_lights[100];
@@ -197,10 +196,7 @@ void main_loop(Colour<BYTE>* src_pixels)
 	//Vec3 p = { -25, -25, -25 };
 	//mtrx.translate(p);
 
-	z_size_t oldcnt = g_objects_cnt;
-	g_objects_cnt = g_box_idx;
-	create_box({ -25, -25, -25 }, { 50, 50, 50 }, { 1.0, 0.7, 0.7, 0.7 }, g_box_texture, { 1, 1});
-	g_objects_cnt = g_box_idx;
+	rebuild_box(g_box_idx, { -25, -25, -25 }, { 50, 50, 50 });
 	for (a = g_box_idx; a < g_box_idx + 6; a++)
 	{
 		mtrx.transform(g_objects[a].s);
@@ -213,7 +209,7 @@ void main_loop(Colour<BYTE>* src_pixels)
 		//Ob[a].n = -Ob[a].dA.normal(Ob[a].dB);
 		//CalcNorm(Ob[a]);
 	}
-	g_objects_cnt = oldcnt;
+
 
 	transform_camera();
 
@@ -697,7 +693,7 @@ inline bool trace_light(Vec3& o, Vec3& r, Object* OBJ)
 	//float ObAYBZ,ObAXBY,ObAXBZ,ObAZBY,ObAYBX;
 	Vec3 MOLS;
 	float D, D1, D2, D3;
-	Object* MyObb = &g_objects_shadowers[0];
+	Object* MyObb = g_objects_shadowers[0];
 	//unsigned int a = MyLS->LastPolyHit;
 	//if(a>=NOBSt) a=0;
 	z_size_t cnt = g_objects_shadowers_cnt;
@@ -710,7 +706,7 @@ inline bool trace_light(Vec3& o, Vec3& r, Object* OBJ)
 
 	while (cnt--)
 	{
-		Object* MyObb = &g_objects_shadowers[cnt];
+		Object* MyObb = g_objects_shadowers[cnt];
 		if (MyObb != OBJ)
 		{
 			if (MyObb->pType == 2)	// Sphere
@@ -883,7 +879,6 @@ void render_text_overlay(SDL_Renderer* renderer)
 
 inline void transform_camera()
 {
-
 	// Reset camera before translation.
 	set_plane(g_camera.screen, { 0, 0, -static_cast <float>(g_eye) }, { 1, 0, 0 }, { 0, 1, 0 });
 	g_camera.fp = { 0, 0, 0 };
@@ -893,19 +888,14 @@ inline void transform_camera()
 	
 	mtrx.ident();
 	mtrx.rotate(g_camera_angle);
+	// screen plane rotate around the origion (center of screen).
+	mtrx.transform(g_camera.screen.dA);
+	mtrx.transform(g_camera.screen.dB);
+	// camera positions are also translated.
 	mtrx.translate(g_camera_position);
 	mtrx.transform(g_camera.screen.s);
 	mtrx.transform(g_camera.fp);
-
-
-	mtrx.ident();
-	mtrx.rotate(g_camera_angle);
-	
-	mtrx.transform(g_camera.screen.dA);
-	mtrx.transform(g_camera.screen.dB);
-
-	g_camera.screen.n = g_camera.screen.dA.cross_product(g_camera.screen.dB);
-	g_camera.screen.nu = g_camera.screen.n.unitary();
+	g_camera.screen.pre_compute();
 
 
 	// Now the camera is setup, we can consider optimizing the objects and 
@@ -915,10 +905,16 @@ inline void transform_camera()
 
 	long b=0,c=0;
 
+	g_objects_shadowers.clear();
+	g_objects_shadowers.reserve(g_objects_cnt);
+	g_objects_in_view.clear();
+	g_objects_in_view.reserve(g_objects_cnt);
+
+
 	for (z_size_t a = 0; a < g_objects_cnt; a++)
 	{
-		g_objects_shadowers[b] = g_objects[a];
-		g_objects_in_view[c] = &g_objects_shadowers[b];
+		g_objects_shadowers[b] = &g_objects[a];
+		g_objects_in_view[c] = g_objects_shadowers[b];
 		c++;
 		b++;
 	}
@@ -946,14 +942,8 @@ void process_inputs(void)
 	if (key_get(SDL_SCANCODE_LSHIFT)) g_movement_multiplier = 5.0f;
 	else if (key_get(SDL_SCANCODE_LCTRL)) g_movement_multiplier = 0.5f;
 
-	if (key_get(SDL_SCANCODE_LEFT))
-	{
-		g_camera_angle.y -= 4.0f * g_movement_multiplier;
-	}
-	if (key_get(SDL_SCANCODE_RIGHT))
-	{
-		g_camera_angle.y += 4.0f * g_movement_multiplier;
-	}
+	if (key_get(SDL_SCANCODE_LEFT))	g_camera_angle.y -= 4.0f * g_movement_multiplier;
+	if (key_get(SDL_SCANCODE_RIGHT)) g_camera_angle.y += 4.0f * g_movement_multiplier;
 	if (key_get(SDL_SCANCODE_UP))
 	{
 		g_camera_position.x -= MySin(-g_camera_angle.y) * 15.0f * g_movement_multiplier;
@@ -966,15 +956,8 @@ void process_inputs(void)
 		g_camera_position.z -= MyCos(-g_camera_angle.y) * 15.0f * g_movement_multiplier;
 	}
 
-	if (key_get(SDL_SCANCODE_Y))
-	{
-		g_camera_angle.x -= 8.0f * g_movement_multiplier;
-	}
-	if (key_get(SDL_SCANCODE_H))
-	{
-		g_camera_angle.x += 8.0f * g_movement_multiplier;
-	}
-
+	if (key_get(SDL_SCANCODE_Y)) g_camera_angle.x -= 8.0f * g_movement_multiplier;
+	if (key_get(SDL_SCANCODE_H)) g_camera_angle.x += 8.0f * g_movement_multiplier;
 
 	if (g_camera_angle.x > 359) g_camera_angle.x = g_camera_angle.x - 360;
 	if (g_camera_angle.y > 359) g_camera_angle.y = g_camera_angle.y - 360;
@@ -982,7 +965,6 @@ void process_inputs(void)
 	if (g_camera_angle.x < 0) g_camera_angle.x = 360 + g_camera_angle.x;
 	if (g_camera_angle.y < 0) g_camera_angle.y = 360 + g_camera_angle.y;
 	if (g_camera_angle.z < 0) g_camera_angle.z = 360 + g_camera_angle.z;
-
 
 	if (key_get_clear(SDL_SCANCODE_A)) g_option_antialias = !g_option_antialias;
 	if (key_get_clear(SDL_SCANCODE_S)) g_option_shadows = !g_option_shadows;
@@ -1006,18 +988,10 @@ void process_inputs(void)
 	if (key_get(SDL_SCANCODE_Q)) lv.x -= 1;
 	if (key_get(SDL_SCANCODE_W)) lv.x += 1;
 
-
-
 	if (key_get_clear(SDL_SCANCODE_R)) g_render_timer_lowest = 10000;
 
-	if (key_get(SDL_SCANCODE_O))
-	{
-		g_eye += 10;
-	}
-	if (key_get(SDL_SCANCODE_P))
-	{
-		g_eye -= 10;
-	}
+	if (key_get(SDL_SCANCODE_O)) g_eye += 10;
+	if (key_get(SDL_SCANCODE_P)) g_eye -= 10;
 
 }
 
@@ -1027,9 +1001,9 @@ void process_inputs(void)
 
 inline void set_plane(Object& Mesh, Vec3 s, Vec3 da, Vec3 db) {
 	Mesh.pType = 1;
-	Mesh.SurfaceTexture = -1;
-	Mesh.SurfaceMultH = 1;
-	Mesh.SurfaceMultW = 1;
+	//Mesh.SurfaceTexture = -1;
+	//Mesh.SurfaceMultH = 1;
+	//Mesh.SurfaceMultW = 1;
 	Mesh.s = s;
 	Mesh.dA = da;
 	Mesh.dB = db;
@@ -1037,7 +1011,8 @@ inline void set_plane(Object& Mesh, Vec3 s, Vec3 da, Vec3 db) {
 }
 
 inline z_size_t create_plane(Vec3 s, Vec3 da, Vec3 db, Colour<float> c, z_size_t tx, uv_type tx_mult) {
-	Object& Mesh = g_objects[g_objects_cnt];
+
+	Object Mesh;// = g_objects[g_objects_cnt];
 	Mesh.idx = g_objects_cnt;
 
 	set_plane(Mesh, s, da, db);
@@ -1045,17 +1020,18 @@ inline z_size_t create_plane(Vec3 s, Vec3 da, Vec3 db, Colour<float> c, z_size_t
 	Mesh.SurfaceMultW = tx_mult.u;
 	Mesh.SurfaceMultH = tx_mult.v;
 	Mesh.colour = c;
-
+	g_objects.push_back(Mesh);
 
 	g_objects_cnt += 1;
-
+	
 	return g_objects_cnt - 1;
 
 }
 
+
 inline z_size_t create_sphere(Vec3 s, float radius, Colour<float> c, z_size_t tx, uv_type tx_mult)
 {
-	Object& Mesh = g_objects[g_objects_cnt];
+	Object Mesh; //' = g_objects[g_objects_cnt];
 	Mesh.idx = g_objects_cnt;
 
 	Mesh.pType = 2;
@@ -1065,6 +1041,7 @@ inline z_size_t create_sphere(Vec3 s, float radius, Colour<float> c, z_size_t tx
 	Mesh.colour = c;
 	Mesh.s = s;
 	Mesh.radius_squared = radius * radius;
+	g_objects.push_back(Mesh);
 
 	g_objects_cnt += 1;
 	return g_objects_cnt - 1;
@@ -1075,20 +1052,28 @@ inline z_size_t create_sphere(Vec3 s, float radius, Colour<float> c, z_size_t tx
 inline z_size_t create_box(Vec3 s, Vec3 e, Colour<float> c, z_size_t tx, uv_type tx_mult)
 {
 	z_size_t StartInd = 0;
-
 	StartInd = create_plane({ s.x + e.x, s.y + e.y, s.z }, { -e.x, 0, 0 }, { 0, -e.y, 0 }, c, tx,tx_mult);
-
 	StartInd = create_plane({ s.x + e.x, s.y, s.z + e.z }, { -e.x, 0, 0 }, { 0, e.y, 0 }, c, tx, tx_mult);
-	// Top
-	StartInd = create_plane({ s.x + e.x, s.y, s.z }, { -e.x, 0, 0 }, { 0, 0, e.z }, c, tx, tx_mult);
-	// Bottom
-	StartInd = create_plane({ s.x, e.y + s.y, s.z }, { e.x, 0, 0 }, { 0, 0, e.z }, c, tx, tx_mult);
+	StartInd = create_plane({ s.x + e.x, s.y, s.z }, { -e.x, 0, 0 }, { 0, 0, e.z }, c, tx, tx_mult); // Top
+	StartInd = create_plane({ s.x, e.y + s.y, s.z }, { e.x, 0, 0 }, { 0, 0, e.z }, c, tx, tx_mult); // Bottom
 	StartInd = create_plane({ s.x, s.y, s.z }, { 0, e.y, 0 }, { 0, 0, e.z }, c, tx, tx_mult);
 	StartInd = create_plane({ s.x + e.x, s.y + e.y, s.z }, { 0, -e.y, 0 }, { 0, 0, e.z }, c, tx, tx_mult);
 
 	return StartInd - 5;
 }
 
+inline void rebuild_box(z_size_t mesh_idx, Vec3 s, Vec3 e)
+{
+	z_size_t StartInd = 0;
+	//set_plane(Mesh, s, da, db);
+	set_plane(g_objects[mesh_idx + 0], { s.x + e.x, s.y + e.y, s.z }, { -e.x, 0, 0 }, { 0, -e.y, 0 });
+	set_plane(g_objects[mesh_idx + 1], { s.x + e.x, s.y, s.z + e.z }, { -e.x, 0, 0 }, { 0, e.y, 0 });
+	set_plane(g_objects[mesh_idx + 2], { s.x + e.x, s.y, s.z }, { -e.x, 0, 0 }, { 0, 0, e.z }); // Top
+	set_plane(g_objects[mesh_idx + 3], { s.x, e.y + s.y, s.z }, { e.x, 0, 0 }, { 0, 0, e.z }); // Bottom
+	set_plane(g_objects[mesh_idx + 4], { s.x, s.y, s.z }, { 0, e.y, 0 }, { 0, 0, e.z });
+	set_plane(g_objects[mesh_idx + 5], { s.x + e.x, s.y + e.y, s.z }, { 0, -e.y, 0 }, { 0, 0, e.z });
+
+}
 
 
 

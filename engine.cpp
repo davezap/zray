@@ -84,8 +84,8 @@ z_size_t g_objects_shadowers_cnt;
 std::vector<Object*> g_objects_in_view;	// back-face culled subset of g_objects_shadowers, 
 z_size_t g_objects_in_view_cnt;			// this is what the camera can see.
 
-Light g_lights[100];
-Light g_lights_active[100];
+std::vector<Light> g_lights;
+std::vector<Light*> g_lights_active;
 z_size_t g_lights_cnt;				// Number of lights
 z_size_t g_lights_active_cnt;
 
@@ -341,6 +341,7 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 
 			for (float Xr = static_cast <float>(Xmin); Xr < Xmax; Xr += gro_screen_divisor)
 			{
+				
 				// This is the point we cast the ray through
 				Vec3 pixelPos = (gtl_camera.screen.s - gtl_camera.fp) + (gtl_camera.screen.dA * Xr) + (gtl_camera.screen.dB * Yr);
 				//Vec3 pixelPos = { Xr, Yr, 600 };
@@ -353,8 +354,20 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 					pixel = { 0,0,0,0 };
 				}
 				*/
+				/*
+				for (int t = 0; t < 20; t++) {
 
+				
+					Vec3 r = { rand()%10-5,rand() % 10 - 1,0};
+					r = gtl_camera.fp + r;
+					trace(r , pixelPos, pixel);
+				}
+				pixel /= 20;
+				*/
+				
 				trace(gtl_camera.fp, pixelPos, pixel);
+
+
 				if (g_option_antialias)
 				{
 
@@ -422,18 +435,12 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 	thread_local uv_type gtl_surface_uv_min;
 	float R = 10000000, lR = 0;		// Temp Len & Ang
 	// Create pointer to our transformed and pruned World.
-	Object* tob = g_objects_in_view[0];
 	Object* MyFace = 0;
 
-
-
 	// Find closest object : Cast ray from users eye > through screen
-
-	z_size_t OBJ = -1;
-	for (z_size_t a = 0; a < g_objects_in_view_cnt; a++)
+	for (auto &tob : g_objects_in_view)
 	{
-		tob = g_objects_in_view[a];
-
+		
 		// Calculate ray plane intersection point
 		float intercept = 0;
 
@@ -499,14 +506,12 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 	{
 		if (g_option_lighting)
 		{
-			Light* MyLS = g_lights_active;
-
 			// For each light in the scene
 			//	- test if we can trace a direct path from light to surface.
 			//  - if so then calculate the intensity and colour of falling on our surface
 			//  - otherwise if the light cannot see surface it is casting a shadow (the absence of light)
 			
-			for (z_size_t LSX = 0; LSX < g_lights_active_cnt; LSX++)
+			for (auto *MyLS : g_lights_active)
 			{
 				float F = 1; // F represents intensity from 0 to 1.  (start with one for point lights)
 
@@ -627,89 +632,74 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 
 inline bool trace_light(Vec3& o, Vec3& r, Object* OBJ)
 {
-	//float ObAYBZ,ObAXBY,ObAXBZ,ObAZBY,ObAYBX;
-	Vec3 MOLS;
-	float D, D1, D2, D3;
-	Object* MyObb = g_objects_shadowers[0];
-	//unsigned int a = MyLS->LastPolyHit;
-	//if(a>=NOBSt) a=0;
+
 	z_size_t cnt = g_objects_shadowers_cnt;
 
-	// Sphere test specific vars.
-	float t;
 	Vec3 dir = r.unitary();
-	//float a = 1; // dir.dot(dir); // Assuming 'dir' is normalized, a = 1.
 	float r_len = r.length();
 
 	while (cnt--)
 	{
 		Object* MyObb = g_objects_shadowers[cnt];
-		if (MyObb != OBJ)
-		{
-			if (MyObb->pType == 2)	// Sphere
-			{
+		if (MyObb == OBJ) continue;
 
-				Vec3 L = MyObb->s - o;
+		if (MyObb->pType == 1) // Plane.
+		{	
 
-				float b = -2.0 * dir.dot(L);
-				float c = L.dot(L) - MyObb->radius_squared;	// dA.x is radius.
+			float D = r.dot(MyObb->nu);
 
-				float discriminant = b * b - 4 * c; // ( b * b - 4 * a * c) Assuming 'dir' is normalized, a = 1.
-				if (discriminant < 0) {
-					//MyObb++; 
+			if (D > 0) {
+				Vec3 sr = MyObb->s - o;
+				float D1 = sr.dot(MyObb->nu) / D;
+				if (D1 < 0 || D1 >= 1) continue;
+				Vec3 disp = r * D1 - sr;
+				float uv = disp.dot(MyObb->dAu) / MyObb->dA_len; // u
+				if (uv < 0.0f || uv > 1.0f) continue;
+				uv = disp.dot(MyObb->dBu) / MyObb->dB_len;	// v
+				if (uv >= 0.0f && uv <= 1.0f) return true;
+			}
+
+		} else {	// Sphere
+
+			Vec3 L = MyObb->s - o;
+
+			float b = -2.0 * dir.dot(L);
+			float c = L.dot(L) - MyObb->radius_squared;	// dA.x is radius.
+
+			float discriminant = b * b - 4 * c; // ( b * b - 4 * a * c) Assuming 'dir' is normalized, a = 1.
+			if (discriminant < 0) {
+				//MyObb++; 
+				continue;
+			}
+				// No real roots: the ray misses the sphere.
+
+			if (b > 0) return false;
+
+			float sqrtDiscriminant = std::sqrt(discriminant);
+			// Two possible solutions for t.
+			float t0 = (-b - sqrtDiscriminant) / 2; // (2 * a)
+			float t1 = (-b + sqrtDiscriminant) / 2; // (2 * a)
+
+			// Ensure t0 is the smaller value.
+			if (t0 > t1)
+				std::swap(t0, t1);
+
+			// If the smallest t is negative, then check the larger one.
+
+			if (t0 < 0) {
+				if (t1 < 0) // Both intersections are behind the ray.
+				{
 					continue;
 				}
-				 // No real roots: the ray misses the sphere.
-
-				if (b > 0) return false;
-
-				float sqrtDiscriminant = std::sqrt(discriminant);
-				// Two possible solutions for t.
-				float t0 = (-b - sqrtDiscriminant) / 2; // (2 * a)
-				float t1 = (-b + sqrtDiscriminant) / 2; // (2 * a)
-
-				// Ensure t0 is the smaller value.
-				if (t0 > t1)
-					std::swap(t0, t1);
-
-				// If the smallest t is negative, then check the larger one.
-
-				if (t0 < 0) {
-					if (t1 < 0) // Both intersections are behind the ray.
-					{
-						continue;
-					}
-					t0 = t1;
-				}
-
-				if (t0 > r_len) continue;
-
-				return true;
-
-			}
-			else {	// Plane.
-				
-				//if (MyObb->InterPlaneTest(o, r)) return true;
-							
-				float D = r.dot(MyObb->nu);
-
-				if (D > 0) {
-					Vec3 sr = MyObb->s - o;
-					float D1 = sr.dot(MyObb->nu) / D;
-					if (D1 < 0 || D1 >= 1) continue;
-					Vec3 disp = r * D1 - sr;
-					uv_type uv;
-					uv.u = disp.dot(MyObb->dAu) / MyObb->dA_len;
-					if (uv.u < 0.0f || uv.u > 1.0f) continue;
-					uv.v = disp.dot(MyObb->dBu) / MyObb->dB_len;
-					if (uv.v >= 0.0f && uv.v <= 1.0f) {
-						return true;
-					}
-				}
-
+				t0 = t1;
 			}
 
+			if (t0 > r_len) continue;
+
+			return true;
 		}
+
+
 	}
 
 	return false;
@@ -830,11 +820,12 @@ inline void transform_camera()
 		g_objects_in_view_cnt = c;
 
 		b = 0;
-		for (z_size_t a = 0; a < g_lights_cnt; a++)
+		g_lights_active.clear();
+		for (Light &light : g_lights)
 		{
-			if (g_lights[a].Enabled)
+			if (light.Enabled)
 			{
-				g_lights_active[b] = g_lights[a];
+				g_lights_active.push_back(&light);
 				b++;
 			}
 		}
@@ -1004,16 +995,19 @@ void load_world(void)
 	std::cout << world.dump();
 	for (auto& j : world.at("lights").ArrayRange())
 	{
-		g_lights[g_lights_cnt].Type = j["type"].ToInt();
-		g_lights[g_lights_cnt].Enabled = j["enabled"].ToBool();
-		g_lights[g_lights_cnt].s.fromJSON(j["s"]);
-		g_lights[g_lights_cnt].colour.fromJSON(j["colour"]);
-		if (g_lights[g_lights_cnt].Type == 2) {
-			g_lights[g_lights_cnt].direction.fromJSON(j["n"]);
-			g_lights[g_lights_cnt].Cone = static_cast<float>(j["cone"].ToFloat());
-			g_lights[g_lights_cnt].FuzFactor = static_cast<float>(j["falloff"].ToFloat());
-		}
+		Light light;
 		
+		light.Type = j["type"].ToInt();
+		light.Enabled = j["enabled"].ToBool();
+		light.s.fromJSON(j["s"]);
+		light.colour.fromJSON(j["colour"]);
+		if (light.Type == 2) {
+			light.direction.fromJSON(j["n"]);
+			light.Cone = static_cast<float>(j["cone"].ToFloat());
+			light.FuzFactor = static_cast<float>(j["falloff"].ToFloat());
+		}
+
+		g_lights.push_back(light);
 		g_lights_cnt++;
 	}
 

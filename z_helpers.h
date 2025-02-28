@@ -11,11 +11,7 @@
 
 inline unsigned char g_keyboard_buffer[256];
 
-bool load_texture(cTexture& MyTexture, const wchar_t* szFileName, bool force256);
-inline Colour<BYTE> get_texture_pixel(cTexture& MyTexture, z_screen_t x, z_screen_t y);
 void handle_key_event_down(SDL_Scancode code);
-inline bool key_get_clear(SDL_Scancode code);
-inline bool key_get(SDL_Scancode code);
 void handle_key_event_up(SDL_Scancode code);
 
 

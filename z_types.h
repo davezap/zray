@@ -1,13 +1,12 @@
 #pragma once
 
-
+#include <type_traits>
 #include <string>
 #include <SDL3/SDL.h>
 #include "z_math.h"
 
 #include "json.hpp"
 
-using json::JSON;
 
 typedef unsigned int z_size_t;
 typedef unsigned int z_screen_t;	// used for x an y coordinates in to textures and the display
@@ -18,14 +17,14 @@ struct uv_type
 {
 	float u = 0.0f, v = 0.0f;
 
-	void fromJSON(JSON& j)
+	void fromJSON(json::JSON& j)
 	{
-		if (j.at(0).JSONType() == JSON::Class::Integral)
+		if (j.at(0).JSONType() == json::JSON::Class::Integral)
 			u = static_cast<float>(j.at(0).ToInt());
 		else
 			u = static_cast<float>(j.at(0).ToFloat());
 
-		if (j.at(1).JSONType() == JSON::Class::Integral)
+		if (j.at(1).JSONType() == json::JSON::Class::Integral)
 			v = static_cast<float>(j.at(1).ToInt());
 		else
 			v = static_cast<float>(j.at(1).ToFloat());
@@ -111,7 +110,6 @@ struct Vec3 {
 	// dot product, used to get cosine angle between two vectors.
 	inline float cos_angle(const Vec3& other)
 	{
-		//return (x * other.x + y * other.y + z * other.z) / (sqrt(x * x + y * y + z * z) * sqrt(other.x * other.x + other.y * other.y + other.z * other.z));
 		return dot(other) / (length() * other.length());
 	}
 
@@ -136,19 +134,19 @@ struct Vec3 {
 		z = static_cast<float>(j.at(2).ToFloat());
 	}
 	*/
-	void fromJSON(JSON& j)
+	void fromJSON(json::JSON& j)
 	{
-		if (j.at(0).JSONType() == JSON::Class::Integral)
+		if (j.at(0).JSONType() == json::JSON::Class::Integral)
 			x = static_cast<float>(j.at(0).ToInt());
 		else
 			x = static_cast<float>(j.at(0).ToFloat());
 
-		if (j.at(1).JSONType() == JSON::Class::Integral)
+		if (j.at(1).JSONType() == json::JSON::Class::Integral)
 			y = static_cast<float>(j.at(1).ToInt());
 		else
 			y = static_cast<float>(j.at(1).ToFloat());
 
-		if (j.at(2).JSONType() == JSON::Class::Integral)
+		if (j.at(2).JSONType() == json::JSON::Class::Integral)
 			z = static_cast<float>(j.at(2).ToInt());
 		else
 			z = static_cast<float>(j.at(2).ToFloat());
@@ -254,6 +252,15 @@ struct Colour {
 		r *= t;
 		g *= t;
 		b *= t;
+		a *= t;
+		return *this;
+	}
+
+	inline Colour<T>& operator*(float t) {
+		r *= t;
+		g *= t;
+		b *= t;
+		a *= t;
 		return *this;
 	}
 
@@ -272,10 +279,10 @@ struct Colour {
 
 	inline void fromFloatC(Colour<float> fcolour)
 	{
-		r = static_cast <BYTE>(fcolour.r);
-		g = static_cast <BYTE>(fcolour.g);
-		b = static_cast <BYTE>(fcolour.b);
-		//a = static_cast <BYTE>(fcolour.a);
+		r = static_cast <BYTE>(fcolour.r*255);
+		g = static_cast <BYTE>(fcolour.g*255);
+		b = static_cast <BYTE>(fcolour.b*255);
+		a = static_cast <BYTE>(fcolour.a*255);
 	}
 
 	inline Vec3 toNormal() const {
@@ -290,17 +297,27 @@ struct Colour {
 		if (r < 0) r = 0;
 		if (g < 0) g = 0;
 		if (b < 0) b = 0;
-		//if (a < 0) a = 0;
-		if (r > 255) r = 255;
-		if (g > 255) g = 255;
-		if (b > 255) b = 255;
-		//if (a > 255) a = 255;
+		if (a < 0) a = 0;
+		if constexpr (std::is_floating_point_v<T>) {
+			if (r > 1) r = 1;
+			if (g > 1) g = 1;
+			if (b > 1) b = 1;
+			if (a > 1) a = 1;
+		}
+		else {
+			if (r > 255) r = 255;
+			if (g > 255) g = 255;
+			if (b > 255) b = 255;
+			if (a > 255) a = 255;
+
+		}
 
 	}
 
-	void fromJSON(JSON& j)
+
+	void fromJSON(json::JSON& j)
 	{
-		if (j.at(0).JSONType() == JSON::Class::Integral)
+		if (j.at(0).JSONType() == json::JSON::Class::Integral)
 			r = static_cast<float>(j.at(0).ToInt());
 		else
 			r = static_cast<float>(j.at(0).ToFloat());
@@ -317,17 +334,17 @@ struct Colour {
 			return;
 		}
 
-		if (j.at(1).JSONType() == JSON::Class::Integral)
+		if (j.at(1).JSONType() == json::JSON::Class::Integral)
 			g = static_cast<float>(j.at(1).ToInt());
 		else
 			g = static_cast<float>(j.at(1).ToFloat());
 
-		if (j.at(2).JSONType() == JSON::Class::Integral)
+		if (j.at(2).JSONType() == json::JSON::Class::Integral)
 			b = static_cast<float>(j.at(2).ToInt());
 		else
 			b = static_cast<float>(j.at(2).ToFloat());
 
-		if (j.at(3).JSONType() == JSON::Class::Integral)
+		if (j.at(3).JSONType() == json::JSON::Class::Integral)
 			a = static_cast<float>(j.at(3).ToInt());
 		else
 			a = static_cast<float>(j.at(3).ToFloat());
@@ -355,6 +372,8 @@ struct Object
 	float SurfaceMultW;
 	float SurfaceMultH;
 	float radius_squared;
+	bool casts_shadows = true;
+	z_size_t linked_light = 0;
 
 	inline void pre_compute() {
 		dA_len = dA.length();

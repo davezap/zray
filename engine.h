@@ -15,9 +15,9 @@ inline void transform_camera();
 void process_inputs(void);
 
 inline void set_plane(Object& Mesh, Vec3 s, Vec3 da, Vec3 db);
-inline z_size_t create_plane(Vec3 s, Vec3 da, Vec3 db, Colour<float> c, z_size_t tx, uv_type tx_mult);
-inline z_size_t create_sphere(Vec3 s, float radius, Colour<float> c, z_size_t tx, uv_type tx_mult);
-inline z_size_t create_box(Vec3 s, Vec3 e, Colour<float> c, z_size_t tx, uv_type tx_mult);
+inline z_size_t create_plane(Vec3 s, Vec3 da, Vec3 db, Colour<float> c, long tx, uv_type tx_mult);
+inline z_size_t create_sphere(Vec3 s, float radius, Colour<float> c, long tx, uv_type tx_mult);
+inline z_size_t create_box(Vec3 s, Vec3 e, Colour<float> c, long tx, uv_type tx_mult);
 inline void rebuild_box(z_size_t mesh_idx, Vec3 s, Vec3 e);
 
 void load_world(void);

@@ -1,4 +1,4 @@
-#define _CRT_SECURE_NO_WARNINGS
+//#define _CRT_SECURE_NO_WARNINGS
 #include <cstdlib>
 #include <string>
 #include <format>
@@ -15,11 +15,14 @@
 #include "engine.h"
 
 
-using json::JSON;
 
+//unsigned int gro_screen_len = 0;
+//unsigned int gro_screen_width_half = 0;
+//unsigned int gro_screen_height_half = 0;
 
-#define SCREEN_LEN SCREEN_WIDTH * SCREEN_HEIGHT
-
+const unsigned int gro_screen_len = SCREEN_WIDTH * SCREEN_HEIGHT;
+const unsigned int gro_screen_width_half = (SCREEN_WIDTH / 2);
+const unsigned int gro_screen_height_half = (SCREEN_HEIGHT / 2);
 
 // Core rendering variables. //////
 
@@ -27,6 +30,9 @@ Uint64 g_render_timer;			// Tracks the number of ms to render one frame
 Uint64 g_render_timer_lowest = 10000;
 Uint64 g_fps_timer = 0;			// Tracks time for FPS counter.
 int g_fps_timer_low_pass_filter = 0;
+float gro_sub_sample_size = 0;
+
+
 
 long g_eye;						// fp distance from screen
 long gro_eye;					// read only copy for threads if needed.
@@ -103,6 +109,7 @@ thread_local Camera gtl_camera;
 float g_movement_multiplier = 1;// multiplier for holding left-Shift or left-Crtl for movement.
 bool g_option_shadows;
 bool g_option_lighting;
+bool g_option_render_lights;
 bool g_option_antialias;
 bool g_option_textures;
 
@@ -120,18 +127,21 @@ z_size_t g_panda_ball_idx = -1;
 
 void dbg(const wchar_t* szFormat, ...)
 {
+#ifdef _DEBUG
 	wchar_t  szBuff[1024];
 	va_list arg;
 	va_start(arg, szFormat);
 	_vsnwprintf_s(szBuff, sizeof(szBuff), szFormat, arg);
 	va_end(arg);
 	std::wcout << szBuff;
+#endif
 }
 
 
 // called once by SDL_AppInit()
 bool init_world()
 {
+
 	g_sky_texture_idx = 0;
 
 	g_camera_position.x = 0; g_camera_position.y = 0; g_camera_position.z = -300;
@@ -142,8 +152,9 @@ bool init_world()
 	g_option_shadows = true;
 	g_option_textures = true;
 	g_option_lighting = true;
+	g_option_render_lights = true;
 
-	g_light_ambient = { 1.0, 20.0, 20.0, 20.0 };
+	g_light_ambient = { 1.0, 0.08, 0.08, 0.08 };
 
 	load_world();
 
@@ -171,6 +182,8 @@ void main_loop(Colour<BYTE>* src_pixels)
 	g_render_timer = SDL_GetTicks();
 
 	process_inputs();
+
+	gro_sub_sample_size = float(gro_screen_divisor) / 5218.9524 * 2;
 
 	z_size_t a = 0;
 	if (g_panda_ball_idx != -1)
@@ -327,14 +340,10 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 		}
 
 
-		float SupSampSize = float(gro_screen_divisor) / 5218.9524;
 		Colour<float> pixel = { 0.0f, 0.0f, 0.0f, 0.0f };		// Temp Color
 
 		// Define out fixed FP in space
 		gtl_camera = g_camera;
-
-		int Xro = (SCREEN_WIDTH / 2);
-		int Yro = (SCREEN_HEIGHT / 2);
 
 		for (float Yr = static_cast <float>(Ymin); Yr < Ymax; Yr += gro_screen_divisor)	// tsDefRenderStp
 		{
@@ -354,57 +363,51 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 					pixel = { 0,0,0,0 };
 				}
 				*/
-				/*
-				for (int t = 0; t < 20; t++) {
+				
 
-				
-					Vec3 r = { rand()%10-5,rand() % 10 - 1,0};
-					r = gtl_camera.fp + r;
-					trace(r , pixelPos, pixel);
-				}
-				pixel /= 20;
-				*/
-				
 				trace(gtl_camera.fp, pixelPos, pixel);
 
 
 				if (g_option_antialias)
 				{
-
 					// Sample around center point
-					pixelPos.offset({ SupSampSize, SupSampSize, 0 });
+					pixelPos.offset({ gro_sub_sample_size, gro_sub_sample_size, 0 });
 					trace(gtl_camera.fp, pixelPos, pixel);
 
-					pixelPos.offset({ 0, 2 * SupSampSize, 0 });
+					pixelPos.offset({ 0, 2 * gro_sub_sample_size, 0 });
 					trace(gtl_camera.fp, pixelPos, pixel);
 
-					pixelPos.offset({ -2 * SupSampSize, 0, 0 });
+					pixelPos.offset({ -2 * gro_sub_sample_size, 0, 0 });
 					trace(gtl_camera.fp, pixelPos, pixel);
 
-					pixelPos.offset({ 0, -2 * SupSampSize, 0 });
+					pixelPos.offset({ 0, -2 * gro_sub_sample_size, 0 });
 					trace(gtl_camera.fp, pixelPos, pixel);
 					pixel /= 5;
 				}
 
 				pixel.limit_rgba();
+				
+				
 
-
-				int sd = gro_screen_divisor;
-
-				if (gro_screen_divisor > 1)
+				//int sd = gro_screen_divisor;
+				z_size_t XrW = static_cast<int>(Xr) + gro_screen_width_half;
+				z_size_t YrH = static_cast<int>(Yr) + gro_screen_height_half;
+				
+				if (gro_screen_divisor == 1)
 				{
-					for (int x = 0; x < gro_screen_divisor; x++)
+					g_pixels[YrH * SCREEN_WIDTH + XrW].fromFloatC(pixel);
+				} else {
+					Colour<BYTE> pixel_final;
+					pixel_final.fromFloatC(pixel);
+					for (z_size_t x = XrW; x < XrW + gro_screen_divisor; x++)
 					{
-						for (int y = 0; y < gro_screen_divisor; y++)
+						for (z_size_t y = YrH; y < YrH + gro_screen_divisor; y++)
 						{
-							Colour<BYTE>* p = &g_pixels[int((y + Yr + Yro) * SCREEN_WIDTH  + (x + Xr + Xro)) % (SCREEN_LEN)];
-							p->fromFloatC(pixel);
+							Colour<BYTE>* p = &g_pixels[(y * SCREEN_WIDTH  +  x) % gro_screen_len];
+							*p = pixel_final;
 						}
 					}
 
-				}
-				else {
-					g_pixels[int((Yr + Yro) * SCREEN_WIDTH + (Xr + Xro))].fromFloatC(pixel);
 				}
 
 			}
@@ -432,10 +435,10 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 
 	Colour<float> tpixel = { 0.0f,0.0f,0.0f,0.0f };	// Temp RGB Values for this function
 	Vec3 ii = { 0,0,0 };	// Result of Ray intersection point.
-	thread_local uv_type gtl_surface_uv_min;
+	uv_type gtl_surface_uv_min;
 	float R = 10000000, lR = 0;		// Temp Len & Ang
-	// Create pointer to our transformed and pruned World.
-	Object* MyFace = 0;
+	Object* MyFace = nullptr;
+
 
 	// Find closest object : Cast ray from users eye > through screen
 	for (auto &tob : g_objects_in_view)
@@ -475,7 +478,6 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 		
 
 		}
-	sp_out:
 
 		if (intercept)
 		{
@@ -504,7 +506,7 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 	// so begin the shading pass here.
 	if (MyFace)
 	{
-		if (g_option_lighting)
+		if (g_option_lighting && MyFace->casts_shadows)
 		{
 			// For each light in the scene
 			//	- test if we can trace a direct path from light to surface.
@@ -576,7 +578,6 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 					if (g_option_shadows == true && trace_light(MyLS->s, s_minus_ii, MyFace)) goto cont;
 
 					// Add colour components to our pix value
-					F = F * 256;
 					tpixel.r += (MyLS->colour.r * F);
 					tpixel.g += (MyLS->colour.g * F);
 					tpixel.b += (MyLS->colour.b * F);
@@ -588,11 +589,10 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 
 		}
 		else {	// !chk_Lighting
-			tpixel.r = 255;
-			tpixel.g = 255;
-			tpixel.b = 255;
+			tpixel.r = 1;
+			tpixel.g = 1;
+			tpixel.b = 1;
 		}
-
 
 		tpixel += g_light_ambient;
 
@@ -610,7 +610,6 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 		else {
 			// Ok, now add background illumination as a light source
 			// and scale the whole thing based on the surface color
-
 			pixel.r += (tpixel.r) * MyFace->colour.r;
 			pixel.g += (tpixel.g) * MyFace->colour.g;
 			pixel.b += (tpixel.b) * MyFace->colour.b;
@@ -619,9 +618,9 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 	}
 	else {
 		// Sky.
-		pixel.g += r.z * 128; //  (+SCREEN_WIDTH / 2) / SCREEN_WIDTH;
-		pixel.r += r.x * 128; //  (r.x + SCREEN_WIDTH / 2) / SCREEN_WIDTH;
-		pixel.b += r.y * 128; //(r.y + SCREEN_HEIGHT / 2) / SCREEN_HEIGHT;
+		pixel.g += r.z * 0.5f; //  (+SCREEN_WIDTH / 2) / SCREEN_WIDTH;
+		pixel.r += r.x * 0.5f; //  (r.x + SCREEN_WIDTH / 2) / SCREEN_WIDTH;
+		pixel.b += r.y * 0.5f; //(r.y + SCREEN_HEIGHT / 2) / SCREEN_HEIGHT;
 	}
 
 
@@ -667,13 +666,10 @@ inline bool trace_light(Vec3& o, Vec3& r, Object* OBJ)
 			float c = L.dot(L) - MyObb->radius_squared;	// dA.x is radius.
 
 			float discriminant = b * b - 4 * c; // ( b * b - 4 * a * c) Assuming 'dir' is normalized, a = 1.
-			if (discriminant < 0) {
-				//MyObb++; 
-				continue;
-			}
-				// No real roots: the ray misses the sphere.
-
-			if (b > 0) return false;
+			
+			if (discriminant < 0) continue;
+			
+			if (b > 0) return false; // No real roots: the ray misses the sphere.
 
 			float sqrtDiscriminant = std::sqrt(discriminant);
 			// Two possible solutions for t.
@@ -748,7 +744,7 @@ void threads_clear() {
 
 void render_text_overlay(SDL_Renderer* renderer)
 {
-	int tmr = (SDL_GetTicks() - g_fps_timer)*100;
+	int tmr = static_cast<int>(SDL_GetTicks() - g_fps_timer)*100;
 	g_fps_timer_low_pass_filter = (tmr + (g_fps_timer_low_pass_filter - tmr)/20)/100;
 	g_fps_timer = SDL_GetTicks();
 	if (g_render_timer < g_render_timer_lowest) g_render_timer_lowest = g_render_timer;
@@ -762,9 +758,9 @@ void render_text_overlay(SDL_Renderer* renderer)
 	std::string debug_buffer = std::format("Move with arrows, (A)anti-aliasing={} - (T)extures={} - (S)hadows={} - (L)ights - (Z/X)Step={} (N/M)Threads={} - (1-7)Lights - (O/P) Focal distance={}", g_option_antialias, g_option_textures, g_option_shadows, g_screen_divisor, g_threads_requested, g_eye);
 	SDL_RenderDebugText(renderer, 0, 5, debug_buffer.c_str());
 
-	//debug_buffer = std::format("{}x{} : {} fps, render {} - lowest {} ms (R)reset", SCREEN_WIDTH, SCREEN_HEIGHT, 1000 / g_fps_timer_low_pass_filter, g_render_timer, g_render_timer_lowest);
+	debug_buffer = std::format("{}x{} : {} fps, render {} - lowest {} ms (R)reset", SCREEN_WIDTH, SCREEN_HEIGHT, 1000 / g_fps_timer_low_pass_filter, g_render_timer, g_render_timer_lowest);
 	//Longer one for camera debug.
-	debug_buffer = std::format("{}x{} : {} fps, render {}/{} ms - cam fp {} {} {}, s {} {} {}, A {} {} {}, B {} {} {}, n {} {} {}", SCREEN_WIDTH, SCREEN_HEIGHT, 1000 / g_fps_timer_low_pass_filter, g_render_timer, g_render_timer_lowest, g_camera.fp.x, g_camera.fp.y, g_camera.fp.z, g_camera.screen.s.x, g_camera.screen.s.y, g_camera.screen.s.z, g_camera.screen.dAu.x, g_camera.screen.dAu.y, g_camera.screen.dAu.z, g_camera.screen.dBu.x, g_camera.screen.dBu.y, g_camera.screen.dBu.z, g_camera.screen.nu.x, g_camera.screen.nu.y, g_camera.screen.nu.z);
+	//debug_buffer = std::format("{}x{} : {} fps, render {}/{} ms - cam fp {} {} {}, s {} {} {}, A {} {} {}, B {} {} {}, n {} {} {}", SCREEN_WIDTH, SCREEN_HEIGHT, 1000 / g_fps_timer_low_pass_filter, g_render_timer, g_render_timer_lowest, g_camera.fp.x, g_camera.fp.y, g_camera.fp.z, g_camera.screen.s.x, g_camera.screen.s.y, g_camera.screen.s.z, g_camera.screen.dAu.x, g_camera.screen.dAu.y, g_camera.screen.dAu.z, g_camera.screen.dBu.x, g_camera.screen.dBu.y, g_camera.screen.dBu.z, g_camera.screen.nu.x, g_camera.screen.nu.y, g_camera.screen.nu.z);
 	//Output(L"te=%d\n\r", tmr_render);
 
 	SDL_RenderDebugText(renderer, 0, 20, debug_buffer.c_str());
@@ -800,40 +796,43 @@ inline void transform_camera()
 
 	long b=0,c=0;
 
-	if (!copy_obj) {
-		copy_obj = true;
 
-		g_objects_shadowers.clear();
-		//g_objects_shadowers.reserve(g_objects_cnt);
-		g_objects_in_view.clear();
-		//g_objects_in_view.reserve(g_objects_cnt);
+	g_objects_shadowers.clear();
+	//g_objects_shadowers.reserve(g_objects_cnt);
+	g_objects_in_view.clear();
+	//g_objects_in_view.reserve(g_objects_cnt);
 
 
-		for (z_size_t a = 0; a < g_objects_cnt; a++)
-		{
+	for (z_size_t a = 0; a < g_objects_cnt; a++)
+	{
+		if (g_objects[a].casts_shadows) {
 			g_objects_shadowers.push_back(&g_objects[a]);
-			g_objects_in_view.push_back(&g_objects[b]);
-			c++;
 			b++;
 		}
-		g_objects_shadowers_cnt = b;
-		g_objects_in_view_cnt = c;
 
-		b = 0;
-		g_lights_active.clear();
-		for (Light &light : g_lights)
-		{
-			if (light.Enabled)
-			{
-				g_lights_active.push_back(&light);
-				b++;
-			}
-		}
-		g_lights_active_cnt = b;
-
-	
+		if (g_objects[a].linked_light && (!g_option_render_lights ||  g_lights[g_objects[a].linked_light-1].Enabled == false)) continue;
+		
+		g_objects_in_view.push_back(&g_objects[a]);
+		c++;
+			
 	}
-	return;
+	g_objects_shadowers_cnt = b;
+	g_objects_in_view_cnt = c;
+
+	b = 0;
+	g_lights_active.clear();
+	for (Light &light : g_lights)
+	{
+		if (light.Enabled)
+		{
+			g_lights_active.push_back(&light);
+			b++;
+		}
+	}
+	g_lights_active_cnt = b;
+
+
+
 }
 
 
@@ -870,6 +869,7 @@ void process_inputs(void)
 	if (key_get_clear(SDL_SCANCODE_A)) g_option_antialias = !g_option_antialias;
 	if (key_get_clear(SDL_SCANCODE_S)) g_option_shadows = !g_option_shadows;
 	if (key_get_clear(SDL_SCANCODE_L)) g_option_lighting = !g_option_lighting;
+	if (key_get_clear(SDL_SCANCODE_K)) g_option_render_lights = !g_option_render_lights;
 	if (key_get_clear(SDL_SCANCODE_T)) g_option_textures = !g_option_textures;
 	if (key_get_clear(SDL_SCANCODE_Z) && g_screen_divisor > 1) g_screen_divisor--;
 	if (key_get_clear(SDL_SCANCODE_X) && g_screen_divisor < 11) g_screen_divisor++;
@@ -911,7 +911,7 @@ inline void set_plane(Object& Mesh, Vec3 s, Vec3 da, Vec3 db) {
 	Mesh.pre_compute();
 }
 
-inline z_size_t create_plane(Vec3 s, Vec3 da, Vec3 db, Colour<float> c, z_size_t tx, uv_type tx_mult) {
+inline z_size_t create_plane(Vec3 s, Vec3 da, Vec3 db, Colour<float> c, long tx, uv_type tx_mult) {
 
 	Object Mesh;// = g_objects[g_objects_cnt];
 	Mesh.idx = g_objects_cnt;
@@ -930,7 +930,7 @@ inline z_size_t create_plane(Vec3 s, Vec3 da, Vec3 db, Colour<float> c, z_size_t
 }
 
 
-inline z_size_t create_sphere(Vec3 s, float radius, Colour<float> c, z_size_t tx, uv_type tx_mult)
+inline z_size_t create_sphere(Vec3 s, float radius, Colour<float> c, long tx, uv_type tx_mult)
 {
 	Object Mesh; //' = g_objects[g_objects_cnt];
 	Mesh.idx = g_objects_cnt;
@@ -950,7 +950,7 @@ inline z_size_t create_sphere(Vec3 s, float radius, Colour<float> c, z_size_t tx
 }
 
 
-inline z_size_t create_box(Vec3 s, Vec3 e, Colour<float> c, z_size_t tx, uv_type tx_mult)
+inline z_size_t create_box(Vec3 s, Vec3 e, Colour<float> c, long tx, uv_type tx_mult)
 {
 	z_size_t StartInd = 0;
 	StartInd = create_plane({ s.x + e.x, s.y + e.y, s.z }, { -e.x, 0, 0 }, { 0, -e.y, 0 }, c, tx,tx_mult);
@@ -987,13 +987,15 @@ void load_world(void)
 	std::ifstream t("world.json");
 	std::string str((std::istreambuf_iterator<char>(t)),
 		std::istreambuf_iterator<char>());
-	JSON world = JSON::Load(str);
+	json::JSON world = json::JSON::Load(str);
 
-
+	g_objects.clear();
+	g_objects_cnt = 0;
+	g_lights.clear();
+	g_lights_cnt = 0;
 	// LIGHTS
-
-	std::cout << world.dump();
-	for (auto& j : world.at("lights").ArrayRange())
+	g_lights.clear();
+	for (auto& j : world["lights"].ArrayRange())
 	{
 		Light light;
 		
@@ -1009,7 +1011,24 @@ void load_world(void)
 
 		g_lights.push_back(light);
 		g_lights_cnt++;
+
+		// Create a sphere so we can visualise the light source in the scene.
+		Vec3 s;
+		Colour<float> c;
+		float radius = 5;
+		z_size_t tx = -1;
+		uv_type tx_uv;
+		s.fromJSON(j["s"]);
+		//s.x = s.x - 2;
+		c.fromJSON(j["colour"]);
+		c = c * 1.1;
+		c.limit_rgba();
+		int a = create_sphere(s, radius, c, -1, tx_uv);
+		g_objects[a].casts_shadows = false;
+		g_objects[a].linked_light = g_lights_cnt;
+
 	}
+
 
 	// It's handy to disable all but one light when debugging.
 	/*
@@ -1022,12 +1041,12 @@ void load_world(void)
 
 	// Objects
 
-	g_objects_cnt = 0;
+	
 
 	for (auto& j : world.at("objects").ArrayRange())
 	{
 		int t =j["type"].ToInt();
-		if (t == 1) {
+		if (t == 1) {			// Plane
 			Vec3 s, da, db;
 			Colour<float> c;
 			z_size_t tx = j["texture"].ToInt();
@@ -1040,7 +1059,7 @@ void load_world(void)
 			
 			create_plane(s, da, db, c, tx, tx_uv);
 		}
-		else if (t == 2) {
+		else if (t == 2) {		// Sphere
 			Vec3 s;
 			Colour<float> c;
 			float radius = j["r"].ToFloat();
@@ -1055,7 +1074,7 @@ void load_world(void)
 			}
 		}
 		else if (t == 3) {
-			Vec3 s, e;
+			Vec3 s, e;			// Box (of planes)
 			Colour<float> c;
 			z_size_t tx = j["texture"].ToInt();
 			uv_type tx_uv;
@@ -1077,6 +1096,9 @@ void load_world(void)
 		}
 	}
 	
+
+
+
 	// Textures
 
 	g_textures_cnt = 0;
@@ -1089,7 +1111,7 @@ void load_world(void)
 			}
 			else {
 
-				for (int b = 0; b < g_objects_cnt; b++)
+				for (z_size_t b = 0; b < g_objects_cnt; b++)
 				{
 					if (g_objects[b].SurfaceTexture == g_textures_cnt)
 					{

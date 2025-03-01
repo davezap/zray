@@ -1,7 +1,7 @@
 #pragma once
 
-#include <type_traits>
 #include <string>
+#include <vector>
 #include <SDL3/SDL.h>
 #include "z_math.h"
 
@@ -13,7 +13,7 @@ typedef unsigned int z_screen_t;	// used for x an y coordinates in to textures a
 typedef unsigned char BYTE;
 
 
-struct uv_type
+struct UV
 {
 	float u = 0.0f, v = 0.0f;
 
@@ -158,6 +158,11 @@ struct Vec3 {
 struct Matrix44 {
 	float m[4][4];
 
+	Matrix44()
+	{
+		ident();
+	}
+
 	inline void ident()
 	{
 		m[0][0] = 1; m[0][1] = 0; m[0][2] = 0; m[0][3] = 0;
@@ -244,7 +249,6 @@ struct Colour {
 
 		T val;
 	};
-	
 
 	inline Colour<T> operator*(float s) const { return { r * s, g * s, b * s }; }
 
@@ -277,12 +281,19 @@ struct Colour {
 		a += c.a;
 	}
 
+
+	inline float luminance()
+	{
+		return 0.299 * r + 0.587 * g + 0.114 * b;
+		//return std::max(r, std::max(b, g));
+	}
+
 	inline void fromFloatC(Colour<float> fcolour)
 	{
-		r = static_cast <BYTE>(fcolour.r*255);
-		g = static_cast <BYTE>(fcolour.g*255);
-		b = static_cast <BYTE>(fcolour.b*255);
-		a = static_cast <BYTE>(fcolour.a*255);
+		r = static_cast <BYTE>(fcolour.r * 255);
+		g = static_cast <BYTE>(fcolour.g * 255);
+		b = static_cast <BYTE>(fcolour.b * 255);
+		a = static_cast <BYTE>(fcolour.a * 255);
 	}
 
 	inline Vec3 toNormal() const {
@@ -293,25 +304,38 @@ struct Colour {
 		};
 	}
 
+	inline bool is_saturated() {
+		if constexpr (std::is_floating_point_v<T>) {
+			return (r == 1 && g == 0 && b == 1);
+		}
+		else {
+			return (r == 255 && g == 0 && b == 255);
+		}
+	}
+
 	inline void limit_rgba() {
 		if (r < 0) r = 0;
 		if (g < 0) g = 0;
 		if (b < 0) b = 0;
 		if (a < 0) a = 0;
 		if constexpr (std::is_floating_point_v<T>) {
-			if (r > 1) r = 1;
-			if (g > 1) g = 1;
-			if (b > 1) b = 1;
+			if (r > 1 || g > 1 || b > 1) {
+				r = 1;
+				g = 0;
+				b = 1;
+			}
+			//if (g > 1) g = 0;
+			//if (b > 1) b = 1;
 			if (a > 1) a = 1;
 		}
 		else {
-			if (r > 255) r = 255;
-			if (g > 255) g = 255;
-			if (b > 255) b = 255;
+			if (r > 255 || g > 255 || b > 255) {
+				r = 255;
+				g = 0;
+				b = 255;
+			}
 			if (a > 255) a = 255;
-
 		}
-
 	}
 
 
@@ -354,7 +378,7 @@ struct Colour {
 
 
 // Our object structure defined either a plane or sphere. 
-struct Object
+struct ZRay_Object
 {
 	z_size_t idx;
 	int pType;
@@ -385,101 +409,7 @@ struct Object
 		
 	}
 
-	inline float InterPlaneNew2(const Vec3& o, const Vec3& r, Vec3& out_intersect, uv_type& uv)
-	{
-		// r and n are assumed to be normalized.
-		float D = r.dot(nu);
-
-		// Check if the ray is heading towards the plane (using a small epsilon to avoid float issues)
-		if (D > 1e-6) {
-			Vec3 sr = s - o; // vector from ray origin to a known point on the plane
-			float D1 = sr.dot(nu);
-			float L = D1 / D;  // Intersection parameter along the ray
-
-			if (L < 0) {
-				out_intersect = { 0, 0, 0 };
-				return 0;
-			}
-
-			// Calculate the intersection point: p = o + r * L
-			out_intersect = o + r * L;
-
-			// Compute displacement from the plane's reference point
-			Vec3 disp = out_intersect - s;
-
-			// Normalize the basis vectors for UV mapping
-			float dA_length = dA.length();
-			float dB_length = dB.length();
-			Vec3 dA_unit = dA / dA_length;
-			Vec3 dB_unit = dB / dB_length;
-
-			// Project disp onto the normalized vectors and then normalize by the extent lengths
-			uv.u = disp.dot(dA_unit) / dA_length;
-			uv.v = disp.dot(dB_unit) / dB_length;
-
-			// Project disp onto the plane's basis vectors to compute UV coordinates.
-			// (Assumes dA and dB are appropriately scaled to the plane's dimensions.)
-			//uv.u = disp.dot(dA);
-			//uv.v = disp.dot(dB);
-
-			// If the UV coordinates are within the valid range, return L (or another appropriate value)
-			if (uv.u >= 0.0f && uv.u <= 1.0f && uv.v >= 0.0f && uv.v <= 1.0f) {
-				return L;
-			}
-		}
-
-		// If no valid intersection is found, reset the intersection point and return 0.
-		out_intersect = { 0, 0, 0 };
-		return 0;
-	}
-
-	inline float InterPlaneNew(const Vec3& o, const Vec3& r, Vec3& out_intersect, uv_type& uv)
-	{
-		// r and n are assumed to be normalized.
-		float D = r.dot(nu);
-
-		// Check if the ray is heading towards the plane (using a small epsilon to avoid float issues)
-		if (D > 1e-6) {
-			Vec3 sr = s - o; // vector from ray origin to a known point on the plane
-			float D1 = sr.dot(nu);
-			float L = D1 / D;  // Intersection parameter along the ray
-
-			if (L < 0) {
-				out_intersect = { 0, 0, 0 };
-				return 0;
-			}
-
-			// Calculate the intersection point: p = o + r * L
-			out_intersect = o + r * L;
-
-			// Compute displacement from the plane's reference point
-			Vec3 disp = out_intersect - s;
-
-			// Normalize the basis vectors for UV mapping
-
-			// Project disp onto the normalized vectors and then normalize by the extent lengths
-			uv.u = disp.dot(dAu);
-			uv.v = disp.dot(dBu);
-
-			// Project disp onto the plane's basis vectors to compute UV coordinates.
-			// (Assumes dA and dB are appropriately scaled to the plane's dimensions.)
-			//uv.u = disp.dot(dA);
-			//uv.v = disp.dot(dB);
-
-			// If the UV coordinates are within the valid range, return L (or another appropriate value)
-			if (uv.u >= 0.0f && uv.u <= dA_len && uv.v >= 0.0f && uv.v <= dB_len) {
-				uv.u /= dA_len;
-				uv.v /= dB_len;
-				return L;
-			}
-		}
-
-		// If no valid intersection is found, reset the intersection point and return 0.
-		out_intersect = { 0, 0, 0 };
-		return 0;
-	}
-	//626 to 613
-	inline float InterPlane(Vec3 &o, Vec3 &r, Vec3 &out_intersect, uv_type &uv)
+	inline float InterPlane(Vec3 &o, Vec3 &r, Vec3 &out_intersect, UV &uv)
 	{
 		float D = r.dot(n);
 
@@ -503,46 +433,9 @@ struct Object
 		//out_intersect = { 0,0,0 };
 		return 0;
 	}
-	
-	inline bool InterPlaneTest(const Vec3& o, const Vec3& r)
-	{
-		float D = r.dot(nu);
-		if (D <= 0) return false;
-
-		// Check if the ray is heading towards the plane (using a small epsilon to avoid float issues)
-		Vec3 sr = s - o; // vector from ray origin to a known point on the plane
-		float D1 = sr.dot(nu) / D;
-
-		if (D1 < 0 || D1 >= 1) return false;
-
-		// Calculate the intersection point: p = o + r * L
-		//Vec3 out_intersect = o + r * L;
-
-		// Compute displacement from the plane's reference point
-		Vec3 disp = r * D1 - sr;
-
-		// Project disp onto the normalized vectors and then normalize by the extent lengths
-		uv_type uv;
-		uv.u = disp.dot(dAu) / dA.length();
-		if (uv.u < 0.0f || uv.u > 1.0f) return false;
-
-		uv.v = disp.dot(dBu) / dB.length();
-
-		// Project disp onto the plane's basis vectors to compute UV coordinates.
-		// (Assumes dA and dB are appropriately scaled to the plane's dimensions.)
-		//uv.u = disp.dot(dA);
-		//uv.v = disp.dot(dB);
-
-		// If the UV coordinates are within the valid range, return L (or another appropriate value)
-		if (uv.v >= 0.0f && uv.v <= 1.0f) {
-			return true;
-		}
-
-		return false;
-	}
 
 
-	inline float InterSphere(const Vec3& origin, const Vec3& dir, const float& an_Y, Vec3& out_intersect, uv_type& uv)
+	inline float InterSphere(const Vec3& origin, const Vec3& dir, const float& an_Y, Vec3& out_intersect, UV& uv)
 	{
 		static bool first_hit = false;
 		Vec3 intercept;
@@ -601,7 +494,7 @@ struct Object
 
 struct Camera
 {
-	Object screen;// a plane representing the screen surface.
+	ZRay_Object screen;// a plane representing the screen surface.
 	Vec3 fp;	// focal point behind the screen where you are sitting.
 };
 
@@ -618,9 +511,15 @@ struct Light
 	float FuzFactor;// As percentage 0-1
 
 	long LastPolyHit;	// This is for an optimization that was not used, it is being recorded.
+
+	Light()
+	{
+
+	}
+
 };
 
-struct vertex_type
+struct Vertex
 {
 	Vec3 l = { 0, 0, 0 };
 	Vec3 w = { 0,0,0 };
@@ -628,14 +527,14 @@ struct vertex_type
 
 
 
-struct polygon_type
+struct Poly
 {
 	Vec3 n = { 0,0,0 };
 	float D = 0.0f;
 	z_size_t SurfaceTexture = 0;
 
-	vertex_type* vertex[3] = {};
-	uv_type uv[3] = {};
+	Vertex* vertex[3] = {};
+	UV uv[3] = {};
 
 	int visable = 0;
 
@@ -660,7 +559,7 @@ struct polygon_type
 };
 
 
-struct cTexture
+struct Texture
 {
 	std::string filename;
 	Colour<BYTE>* pixels_colour = NULL;
@@ -692,11 +591,7 @@ struct cTexture
 };
 
 
-struct rows_cols {
-	BYTE rows = 0, cols = 0;
-};
-
-struct sprite
+struct Sprite
 {
 	Vec3 position = { 0,0,0 };
 	Vec3 l = { 0,0,0 };
@@ -711,12 +606,12 @@ struct sprite
 	int animation_start = 0;
 	int animation_len = 0;
 	float alpha = 0.0f;
-	cTexture* boTexture = 0;
+	z_size_t boTexture = 0;
 };
 
 
 
-struct object_type
+struct ZSpace_Object
 {
 	z_size_t vertcount = 0;
 	z_size_t polycount = 0;
@@ -732,8 +627,8 @@ struct object_type
 	float mass = 1;
 	float bounds = 1;
 	bool shoot = false;
-	polygon_type* polygon = 0;
-	vertex_type* vertex = 0;
+	Poly* polygon = nullptr;
+	Vertex* vertex = nullptr;
 
 	bool hidden = false;
 };
@@ -741,17 +636,16 @@ struct object_type
 
 
 
-struct world_type
+struct ZSpace_World
 {
-	z_size_t objcount = 0;
-	object_type* obj = 0;
+	std::vector<std::unique_ptr<ZSpace_Object>> obj;
 };
 
 
 
 
 
-struct clip_type
+struct Clip
 {
 	Vec3 position = { 0,0,0 };
 	float x1 = 0.0f, y1 = 0.0f, z1 = 0.0f;
@@ -759,9 +653,9 @@ struct clip_type
 	float u1 = 0.0f, v1 = 0.0f;
 };
 
-struct cliped_polygon_type
+struct Clipped_Poly
 {
 	unsigned int vertcount = 0;
-	clip_type vertex[8] = {};
+	Clip vertex[8] = {};
 };
 

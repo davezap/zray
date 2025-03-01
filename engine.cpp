@@ -37,9 +37,10 @@ float gro_sub_sample_size = 0;
 long g_eye;						// fp distance from screen
 long gro_eye;					// read only copy for threads if needed.
 Colour<float> g_light_ambient;	// global additive illumination 
-
+std::atomic<float> gatm_luminance(0.0f);
+std::atomic<float> gatm_exposure(1.0f);
 thread_local Vec3  gtl_intersect;	// ray plane intersection point
-thread_local uv_type gtl_surface_uv;
+thread_local UV gtl_surface_uv;
 thread_local float gtl_matrix[4][4];
 
 // pointer to our display surface. Note that all threads
@@ -81,13 +82,13 @@ bool gro_threads_render_now = false;
 
 // Scene definitions. ////////////////
 
-std::vector<Object> g_objects;	// All objects
+std::vector<ZRay_Object> g_objects;	// All objects
 z_size_t g_objects_cnt;			// ...and number off
 
-std::vector<Object*> g_objects_shadowers; // Ob[]'s here after transforms, rotate, and frustum check.
+std::vector<ZRay_Object*> g_objects_shadowers; // Ob[]'s here after transforms, rotate, and frustum check.
 z_size_t g_objects_shadowers_cnt;
 
-std::vector<Object*> g_objects_in_view;	// back-face culled subset of g_objects_shadowers, 
+std::vector<ZRay_Object*> g_objects_in_view;	// back-face culled subset of g_objects_shadowers, 
 z_size_t g_objects_in_view_cnt;			// this is what the camera can see.
 
 std::vector<Light> g_lights;
@@ -96,7 +97,7 @@ z_size_t g_lights_cnt;				// Number of lights
 z_size_t g_lights_active_cnt;
 
 z_size_t g_textures_cnt = 0;
-cTexture g_textures[10];
+Texture g_textures[10];
 
 Vec3 g_camera_angle = { 0, 0, 0 };				// View Point Angle
 Vec3 g_camera_position;				// View Point Pos
@@ -202,7 +203,6 @@ void main_loop(Colour<BYTE>* src_pixels)
 	box_angle.roll360();
 
 	Matrix44 mtrx;
-	mtrx.ident();
 	mtrx.rotate(box_angle);
 
 	rebuild_box(g_box_idx, { -25, -25, -25 }, { 50, 50, 50 });
@@ -283,6 +283,12 @@ void main_loop(Colour<BYTE>* src_pixels)
 	gro_screen_divisor = g_screen_divisor;
 	gro_eye = g_eye;
 
+	// update auto-expusure to prevent clipping (pink)
+	gatm_exposure += (0.98 - gatm_luminance)/10;
+	if (gatm_exposure > 2) gatm_exposure = 2;
+	gatm_luminance = 0;
+
+
 	// Command threads to start rendering
 	{
 		std::unique_lock<std::mutex> lock(gmtx_change_shared);
@@ -312,18 +318,20 @@ void main_loop(Colour<BYTE>* src_pixels)
 
 void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 {
-
 	dbg(L"[%d] Thread Start\n", thread_num);
+
 	{
 		std::unique_lock<std::mutex> lock(gmtx_change_shared);
 		gatm_threads_waiting.fetch_add(1); // Increment the number of threads waiting
 		gcv_threads_wait.notify_all();
 	}
 
-	//threads_waiting.fetch_add(1);
+	float render_area = std::abs(Xmax - Xmin * Ymax - Ymin);	// in pixels.
+	
 
 	while (!gatm_threads_exit_now.load())
 	{
+
 		{
 			std::unique_lock<std::mutex> lock(gmtx_change_shared);
 			gatm_threads_ready_cnt.fetch_add(1);
@@ -341,6 +349,9 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 
 
 		Colour<float> pixel = { 0.0f, 0.0f, 0.0f, 0.0f };		// Temp Color
+		float luminance_max = 0.0f;
+		float l = 0.0f;
+		float exposure = gatm_exposure.load();
 
 		// Define out fixed FP in space
 		gtl_camera = g_camera;
@@ -385,8 +396,10 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 					pixel /= 5;
 				}
 
+				pixel *= exposure;
+				l = pixel.luminance();
+				if(l > luminance_max) luminance_max = l;
 				pixel.limit_rgba();
-				
 				
 
 				//int sd = gro_screen_divisor;
@@ -407,12 +420,23 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 							*p = pixel_final;
 						}
 					}
-
 				}
 
 			}
 
 		}
+		
+		float global_luminance_max = gatm_luminance.load();
+		while (luminance_max > global_luminance_max && !gatm_luminance.compare_exchange_weak(global_luminance_max, luminance_max)) {
+			// The loop will continue if another thread updates global_max before us
+		}
+
+		/*
+		if(luminance_max > 0.9)
+			gatm_exposure.fetch_sub(0.01);
+		else if (luminance_max < 0.85)
+			gatm_exposure.fetch_add(0.01);
+		*/
 
 		{
 			std::unique_lock<std::mutex> lock(gmtx_change_shared);
@@ -435,9 +459,9 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 
 	Colour<float> tpixel = { 0.0f,0.0f,0.0f,0.0f };	// Temp RGB Values for this function
 	Vec3 ii = { 0,0,0 };	// Result of Ray intersection point.
-	uv_type gtl_surface_uv_min;
+	UV gtl_surface_uv_min;
 	float R = 10000000, lR = 0;		// Temp Len & Ang
-	Object* MyFace = nullptr;
+	ZRay_Object* MyFace = nullptr;
 
 
 	// Find closest object : Cast ray from users eye > through screen
@@ -629,7 +653,7 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 
 
 
-inline bool trace_light(Vec3& o, Vec3& r, Object* OBJ)
+inline bool trace_light(Vec3& o, Vec3& r, ZRay_Object* OBJ)
 {
 
 	z_size_t cnt = g_objects_shadowers_cnt;
@@ -639,7 +663,7 @@ inline bool trace_light(Vec3& o, Vec3& r, Object* OBJ)
 
 	while (cnt--)
 	{
-		Object* MyObb = g_objects_shadowers[cnt];
+		ZRay_Object* MyObb = g_objects_shadowers[cnt];
 		if (MyObb == OBJ) continue;
 
 		if (MyObb->pType == 1) // Plane.
@@ -900,7 +924,7 @@ void process_inputs(void)
 
 
 
-inline void set_plane(Object& Mesh, Vec3 s, Vec3 da, Vec3 db) {
+inline void set_plane(ZRay_Object& Mesh, Vec3 s, Vec3 da, Vec3 db) {
 	Mesh.pType = 1;
 	//Mesh.SurfaceTexture = -1;
 	//Mesh.SurfaceMultH = 1;
@@ -911,9 +935,9 @@ inline void set_plane(Object& Mesh, Vec3 s, Vec3 da, Vec3 db) {
 	Mesh.pre_compute();
 }
 
-inline z_size_t create_plane(Vec3 s, Vec3 da, Vec3 db, Colour<float> c, long tx, uv_type tx_mult) {
+inline z_size_t create_plane(Vec3 s, Vec3 da, Vec3 db, Colour<float> c, long tx, UV tx_mult) {
 
-	Object Mesh;// = g_objects[g_objects_cnt];
+	ZRay_Object Mesh;// = g_objects[g_objects_cnt];
 	Mesh.idx = g_objects_cnt;
 
 	set_plane(Mesh, s, da, db);
@@ -930,9 +954,9 @@ inline z_size_t create_plane(Vec3 s, Vec3 da, Vec3 db, Colour<float> c, long tx,
 }
 
 
-inline z_size_t create_sphere(Vec3 s, float radius, Colour<float> c, long tx, uv_type tx_mult)
+inline z_size_t create_sphere(Vec3 s, float radius, Colour<float> c, long tx, UV tx_mult)
 {
-	Object Mesh; //' = g_objects[g_objects_cnt];
+	ZRay_Object Mesh; //' = g_objects[g_objects_cnt];
 	Mesh.idx = g_objects_cnt;
 
 	Mesh.pType = 2;
@@ -950,7 +974,7 @@ inline z_size_t create_sphere(Vec3 s, float radius, Colour<float> c, long tx, uv
 }
 
 
-inline z_size_t create_box(Vec3 s, Vec3 e, Colour<float> c, long tx, uv_type tx_mult)
+inline z_size_t create_box(Vec3 s, Vec3 e, Colour<float> c, long tx, UV tx_mult)
 {
 	z_size_t StartInd = 0;
 	StartInd = create_plane({ s.x + e.x, s.y + e.y, s.z }, { -e.x, 0, 0 }, { 0, -e.y, 0 }, c, tx,tx_mult);
@@ -962,6 +986,7 @@ inline z_size_t create_box(Vec3 s, Vec3 e, Colour<float> c, long tx, uv_type tx_
 
 	return StartInd - 5;
 }
+
 
 inline void rebuild_box(z_size_t mesh_idx, Vec3 s, Vec3 e)
 {
@@ -975,7 +1000,6 @@ inline void rebuild_box(z_size_t mesh_idx, Vec3 s, Vec3 e)
 	set_plane(g_objects[mesh_idx + 5], { s.x + e.x, s.y + e.y, s.z }, { 0, -e.y, 0 }, { 0, 0, e.z });
 
 }
-
 
 
 void load_world(void)
@@ -1017,7 +1041,7 @@ void load_world(void)
 		Colour<float> c;
 		float radius = 5;
 		z_size_t tx = -1;
-		uv_type tx_uv;
+		UV tx_uv;
 		s.fromJSON(j["s"]);
 		//s.x = s.x - 2;
 		c.fromJSON(j["colour"]);
@@ -1050,7 +1074,7 @@ void load_world(void)
 			Vec3 s, da, db;
 			Colour<float> c;
 			z_size_t tx = j["texture"].ToInt();
-			uv_type tx_uv;
+			UV tx_uv;
 			tx_uv.fromJSON(j["uvm"]);
 			s.fromJSON(j["s"]);
 			da.fromJSON(j["da"]);
@@ -1064,7 +1088,7 @@ void load_world(void)
 			Colour<float> c;
 			float radius = j["r"].ToFloat();
 			z_size_t tx = j["texture"].ToInt();
-			uv_type tx_uv;
+			UV tx_uv;
 			tx_uv.fromJSON(j["uvm"]);
 			s.fromJSON(j["s"]);
 			c.fromJSON(j["colour"]);
@@ -1077,7 +1101,7 @@ void load_world(void)
 			Vec3 s, e;			// Box (of planes)
 			Colour<float> c;
 			z_size_t tx = j["texture"].ToInt();
-			uv_type tx_uv;
+			UV tx_uv;
 			tx_uv.fromJSON(j["uvm"]);
 			s.fromJSON(j["s"]);
 			e.fromJSON(j["e"]);

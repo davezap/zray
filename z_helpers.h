@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include <filesystem>
 #include <regex>
 #include <SDL3/SDL.h>
 #include "z_types.h"
@@ -39,7 +40,7 @@ inline bool key_get(SDL_Scancode code)
 
 
 
-inline bool load_texture(cTexture& MyTexture, const std::string szFileName)
+inline bool load_texture(Texture& MyTexture, const std::string szFileName)
 {
 	std::string file = ASSETS_PATH;
 	file += szFileName;
@@ -65,15 +66,21 @@ inline bool load_texture(cTexture& MyTexture, const std::string szFileName)
 
 
 		//  Try load surface normal texture.
-		file = std::regex_replace(file, std::regex("\\_COL_"), "_NRM_");
-		SDL_Surface* bm2 = SDL_LoadBMP(file.c_str());
-		if (bm2)
+		std::string file_normal = std::regex_replace(file, std::regex("\\_COL_"), "_NRM_");
+		if(file_normal!=file && std::filesystem::exists(file_normal))
 		{
-			Colour<BYTE>* pm = (Colour<BYTE>*)bm->pixels;
-			MyTexture.pixels_normal = static_cast<Vec3*>(SDL_malloc(MyTexture.bmWidth * MyTexture.bmHeight * 3 * sizeof(float)));
-			for (z_size_t a = 0; a < MyTexture.bmWidth * MyTexture.bmHeight; a++)
+			SDL_Surface* bm3 = SDL_LoadBMP(file_normal.c_str());
+			if (bm3)
 			{
-				MyTexture.pixels_normal[a] = pm[a].toNormal();
+				SDL_Surface* bm = SDL_ConvertSurface(bm3, SDL_PIXELFORMAT_ABGR32);
+				SDL_DestroySurface(bm3);
+
+				Colour<BYTE>* pm = (Colour<BYTE>*)bm->pixels;
+				MyTexture.pixels_normal = static_cast<Vec3*>(SDL_malloc(MyTexture.bmWidth * MyTexture.bmHeight * 3 * sizeof(float)));
+				for (z_size_t a = 0; a < MyTexture.bmWidth * MyTexture.bmHeight; a++)
+				{
+					MyTexture.pixels_normal[a] = pm[a].toNormal();
+				}
 			}
 		}
 

@@ -396,11 +396,15 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 					pixel /= 5;
 				}
 
-				pixel *= exposure;
-				l = pixel.luminance();
-				if(l > luminance_max) luminance_max = l;
-				pixel.limit_rgba();
-				
+				// The trace function sets alpha (not really used for transparenvy) 
+				// to indicate if the pixel contributes to our overall scene luminance.
+				if(pixel.a == 0)
+				{
+					pixel *= exposure;
+					l = pixel.luminance();
+					if(l > luminance_max) luminance_max = l;
+					pixel.limit_rgba();
+				}
 
 				//int sd = gro_screen_divisor;
 				z_size_t XrW = static_cast<int>(Xr) + gro_screen_width_half;
@@ -618,9 +622,6 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 			tpixel.b = 1;
 		}
 
-		tpixel += g_light_ambient;
-
-
 		// Last step is to perform texturing of the surface point
 		if (MyFace->SurfaceTexture != -1 && g_option_textures)
 		{
@@ -639,6 +640,17 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 			pixel.b += (tpixel.b) * MyFace->colour.b;
 
 		}
+
+		if (!MyFace->casts_shadows)
+		{
+			pixel.a = 1;
+		}
+		else {
+			tpixel += g_light_ambient;
+		}
+
+		
+
 	}
 	else {
 		// Sky.

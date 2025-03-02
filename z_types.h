@@ -256,7 +256,7 @@ struct Colour {
 		r *= t;
 		g *= t;
 		b *= t;
-		a *= t;
+		///a *= t;
 		return *this;
 	}
 
@@ -284,8 +284,8 @@ struct Colour {
 
 	inline float luminance()
 	{
-		return 0.299 * r + 0.587 * g + 0.114 * b;
-		//return std::max(r, std::max(b, g));
+		//return 0.299 * r + 0.587 * g + 0.114 * b;
+		return std::max(r, std::max(b, g));
 	}
 
 	inline void fromFloatC(Colour<float> fcolour)

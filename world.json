@@ -10,10 +10,12 @@
 	],
 	"lights": [
 		{
-			"type": 1,
+			"type": 2,
 			"enabled": true,
 			"s": [ 0.0, -60.0, 0.0 ],
-			"colour": [ 0.7, 0.7, 0.6, 0.0 ]
+			"colour": [ 0.7, 0.7, 0.6, 0.0 ],
+			"cone": 0.5,
+			"falloff": 0.5
 		}, {
 			"type": 2,
 			"enabled": true,

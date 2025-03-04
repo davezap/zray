@@ -434,6 +434,43 @@ struct ZRay_Object
 		return 0;
 	}
 
+	inline float InterTriangle(Vec3& o, Vec3& r, Vec3& out_intersect, UV& uv)
+	{
+		// Compute two edges sharing vertex v0
+		Vec3 edge1 = dA ;
+		Vec3 edge2 = dB ;
+
+		// Begin calculating determinant - also used to calculate u parameter.
+		Vec3 h = r.cross_product(edge2);
+		float a = edge1.dot(h);
+
+		//If a is close to 0, ray is parallel to the triangle.
+		if (a == 0.0f)
+			return  0.0f;;
+
+
+		float f = 1.0f / a;
+		Vec3 sr = s - o;
+		float u = f * s.dot(h);
+		if (u < 0.0f || u > 1.0f) return 0.0f;
+
+
+		Vec3 q = s.cross_product(edge1);
+		float v = f * r.dot(q);
+		if (v < 0.0f || u + v > 1.0) return 0.0f;
+
+
+		//At this stage, we can compute t to find out where the intersection point is on the line.
+		float t = f * edge2.dot(q);
+		if (t > 0.0f) {	// ray intersection
+			out_intersect.x = o.x + r.x * t;
+			out_intersect.y = o.y + r.y * t;
+			out_intersect.z = o.z + r.z * t;
+			return t;
+		}
+		
+		return 0;
+	}
 
 	inline float InterSphere(const Vec3& origin, const Vec3& dir, const float& an_Y, Vec3& out_intersect, UV& uv)
 	{

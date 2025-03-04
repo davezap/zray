@@ -189,8 +189,8 @@ void main_loop(Colour<BYTE>* src_pixels)
 	z_size_t a = 0;
 	if (g_panda_ball_idx != -1)
 	{
-		g_objects[g_panda_ball_idx].radius_squared = 8000;
-		g_objects[g_panda_ball_idx].s.y = 0;
+		//g_objects[g_panda_ball_idx].radius_squared = 8000;
+		//g_objects[g_panda_ball_idx].s.y = 0;
 		if (g_objects[g_panda_ball_idx].radius_squared <= 8000)
 		{			
 			g_objects[g_panda_ball_idx].radius_squared *= 1 + (8050 - g_objects[g_panda_ball_idx].radius_squared) / 40000;
@@ -368,13 +368,26 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 				pixelPos = pixelPos.unitary();
 				// Reset our Point colour..
 				pixel = { 0,0,0,0 };
-				/*
-				if (Xr == Xmin && Yr == Ymin)
+				
+				//if (Xr == Xmin && Yr == Ymin)
+				if (Xr == 0 && Yr == 0)
 				{
 					pixel = { 0,0,0,0 };
 				}
-				*/
 				
+				
+				/*
+				int n = 10;
+				//if (gro_screen_divisor == 1) n = 100;
+				for (int a = 0; a < n; a++)
+				{
+					float rndx = static_cast<float>(std::rand() % 1000 - 500) / 2000;
+					float rndy = static_cast<float>(std::rand() % 1000 - 500) / 2000;
+					Vec3 fp = gtl_camera.fp + (gtl_camera.screen.dA * rndx) + (gtl_camera.screen.dB * rndy);
+					trace(fp, pixelPos, pixel);
+				}
+				pixel /= n;
+				*/
 
 				trace(gtl_camera.fp, pixelPos, pixel);
 
@@ -396,7 +409,7 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 					pixel /= 5;
 				}
 
-				// The trace function sets alpha (not really used for transparenvy) 
+				// The trace function sets alpha (not really used for transparency) 
 				// to indicate if the pixel contributes to our overall scene luminance.
 				if(pixel.a == 0)
 				{
@@ -435,13 +448,6 @@ void render_thread(BYTE thread_num, int Xmin, int Xmax, int Ymin, int Ymax)
 			// The loop will continue if another thread updates global_max before us
 		}
 
-		/*
-		if(luminance_max > 0.9)
-			gatm_exposure.fetch_sub(0.01);
-		else if (luminance_max < 0.85)
-			gatm_exposure.fetch_add(0.01);
-		*/
-
 		{
 			std::unique_lock<std::mutex> lock(gmtx_change_shared);
 			gatm_threads_ready_cnt.fetch_sub(1);
@@ -476,6 +482,7 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 		float intercept = 0;
 
 		if (tob->pType == 1) {
+			//intercept = tob->InterTriangle(o, r, gtl_intersect, gtl_surface_uv);
 			//intercept = tob->InterPlane(o, r, gtl_intersect, gtl_surface_uv);
 			
 			float D = r.dot(tob->n);
@@ -498,6 +505,7 @@ void trace(Vec3& o, Vec3& r, Colour<float>& pixel) //, Colour<float>& normal)
 
 				}
 			}
+
 			
 		}
 		else {
@@ -686,7 +694,7 @@ inline bool trace_light(Vec3& o, Vec3& r, ZRay_Object* OBJ)
 			if (D > 0) {
 				Vec3 sr = MyObb->s - o;
 				float D1 = sr.dot(MyObb->nu) / D;
-				if (D1 < 0 || D1 >= 1) continue;
+				if (D1 < 0.0f || D1 > 1.0f) continue;
 				Vec3 disp = r * D1 - sr;
 				float uv = disp.dot(MyObb->dAu) / MyObb->dA_len; // u
 				if (uv < 0.0f || uv > 1.0f) continue;
@@ -705,7 +713,7 @@ inline bool trace_light(Vec3& o, Vec3& r, ZRay_Object* OBJ)
 			
 			if (discriminant < 0) continue;
 			
-			if (b > 0) return false; // No real roots: the ray misses the sphere.
+			if (b > 0) continue; // No real roots: the ray misses the sphere.
 
 			float sqrtDiscriminant = std::sqrt(discriminant);
 			// Two possible solutions for t.
@@ -794,9 +802,9 @@ void render_text_overlay(SDL_Renderer* renderer)
 	std::string debug_buffer = std::format("Move with arrows, (A)anti-aliasing={} - (T)extures={} - (S)hadows={} - (L)ights - (Z/X)Step={} (N/M)Threads={} - (1-7)Lights - (O/P) Focal distance={}", g_option_antialias, g_option_textures, g_option_shadows, g_screen_divisor, g_threads_requested, g_eye);
 	SDL_RenderDebugText(renderer, 0, 5, debug_buffer.c_str());
 
-	debug_buffer = std::format("{}x{} : {} fps, render {} - lowest {} ms (R)reset", SCREEN_WIDTH, SCREEN_HEIGHT, 1000 / g_fps_timer_low_pass_filter, g_render_timer, g_render_timer_lowest);
+	//debug_buffer = std::format("{}x{} : {} fps, render {} - lowest {} ms (R)reset", SCREEN_WIDTH, SCREEN_HEIGHT, 1000 / g_fps_timer_low_pass_filter, g_render_timer, g_render_timer_lowest);
 	//Longer one for camera debug.
-	//debug_buffer = std::format("{}x{} : {} fps, render {}/{} ms - cam fp {} {} {}, s {} {} {}, A {} {} {}, B {} {} {}, n {} {} {}", SCREEN_WIDTH, SCREEN_HEIGHT, 1000 / g_fps_timer_low_pass_filter, g_render_timer, g_render_timer_lowest, g_camera.fp.x, g_camera.fp.y, g_camera.fp.z, g_camera.screen.s.x, g_camera.screen.s.y, g_camera.screen.s.z, g_camera.screen.dAu.x, g_camera.screen.dAu.y, g_camera.screen.dAu.z, g_camera.screen.dBu.x, g_camera.screen.dBu.y, g_camera.screen.dBu.z, g_camera.screen.nu.x, g_camera.screen.nu.y, g_camera.screen.nu.z);
+	debug_buffer = std::format("{}x{} : {} fps, render {}/{} ms - cam fp {} {} {}, s {} {} {}, A {} {} {}, B {} {} {}, n {} {} {}", SCREEN_WIDTH, SCREEN_HEIGHT, 1000 / g_fps_timer_low_pass_filter, g_render_timer, g_render_timer_lowest, g_camera.fp.x, g_camera.fp.y, g_camera.fp.z, g_camera.screen.s.x, g_camera.screen.s.y, g_camera.screen.s.z, g_camera.screen.dAu.x, g_camera.screen.dAu.y, g_camera.screen.dAu.z, g_camera.screen.dBu.x, g_camera.screen.dBu.y, g_camera.screen.dBu.z, g_camera.screen.nu.x, g_camera.screen.nu.y, g_camera.screen.nu.z);
 	//Output(L"te=%d\n\r", tmr_render);
 
 	SDL_RenderDebugText(renderer, 0, 20, debug_buffer.c_str());
@@ -824,6 +832,12 @@ inline void transform_camera()
 	mtrx.transform(g_camera.fp);
 	g_camera.screen.pre_compute();
 
+	g_lights[0].s = g_camera.fp + (g_camera.screen.nu * 50);
+	g_lights[0].s = g_lights[0].s + (g_camera.screen.dA * 50);
+	g_lights[0].s.y += 30;
+	g_lights[0].direction = g_camera.screen.s;
+
+	g_objects[0].s = g_lights[0].s;
 
 	// Now the camera is setup, we can consider optimizing the objects and 
 	// lights to be included in the trace() operations.
@@ -1067,12 +1081,12 @@ void load_world(void)
 
 
 	// It's handy to disable all but one light when debugging.
-	/*
+	
 	for (a = 0; a < g_lights_cnt; a++)
 	{
-		if(a!=9) g_lights[a].Enabled = false;
+		if(a!=0) g_lights[a].Enabled = false;
 	}
-	*/
+	
 	// Done.
 
 	// Objects
@@ -1107,6 +1121,7 @@ void load_world(void)
 			int a = create_sphere(s, radius, c, tx, tx_uv);
 			if (j["desc"].ToString() == "panda ball") {
 				g_panda_ball_idx = a;
+
 			}
 		}
 		else if (t == 3) {
